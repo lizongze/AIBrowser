@@ -14,19 +14,23 @@
 
 ## 界面预览
 
-全屏预览模式下的代码高亮（Cascadia Code，默认全屏时隐藏标题栏与工具栏，只留标签页）：
+Windows 原生运行下的界面（全屏模式：只留标签条，标题栏与工具栏隐藏）。
+截图尺寸 **3072×1876**，与 3072 宽屏幕的物理像素一致：
 
 | JavaScript | CSS |
 | --- | --- |
 | ![代码预览 · JavaScript](images/code-javascript.png) | ![代码预览 · CSS](images/code-css.png) |
 
-| CLI 实现（151KB） | 单文件千行代码 |
+| CLI 实现 | 单文件千行代码 |
 | --- | --- |
 | ![代码预览 · CLI](images/code-cli.png) | ![大文件代码预览](images/code-large-file.png) |
 
 | Markdown | 网页预览（Chromium 渲染） |
 | --- | --- |
 | ![Markdown 预览](images/code-markdown.png) | ![网页预览](images/web-preview.png) |
+
+> 代码区使用 Cascadia Code（含编程连字）；界面中文字体优先微软雅黑/苹方/思源黑体。
+> 想在 WSL 里获得同样的画质，见 [`docs/NOTES.md`](docs/NOTES.md) 的「在 Windows 原生运行」。
 
 ## 快速开始
 
