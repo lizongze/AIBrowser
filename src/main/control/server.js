@@ -705,7 +705,11 @@ class ControlServer {
               + ' codeLang: (document.getElementById("code-lang") || {}).textContent || null,'
               + ' codeChars: (document.querySelector(".cm-content") || {}).textContent ? document.querySelector(".cm-content").textContent.length : 0,'
               + ' tabs: document.querySelectorAll("#tabs .tab").length,'
-              + ' treeNodes: document.querySelectorAll("#tree .node").length }; })()',
+              + ' treeNodes: document.querySelectorAll("#tree .node").length,'
+              + ' sidebarText: (document.getElementById("sidebar") || {}).innerText || "",'
+              + ' rootBarHidden: (document.getElementById("root-bar") || {}).hidden === true,'
+              + ' rootBarText: (document.getElementById("root-bar") || {}).innerText || "",'
+              + ' rootBarBox: (() => { const n = document.getElementById("root-bar"); if (!n) return null; const r = n.getBoundingClientRect(); return { top: Math.round(r.top), height: Math.round(r.height), visible: getComputedStyle(n).display !== "none" }; })() }; })()',
               true,
             );
           } catch (err) {

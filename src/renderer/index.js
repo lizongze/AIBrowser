@@ -797,15 +797,18 @@ async function refreshSessions() {
 /**
  * 文件树该以哪个根目录为根：
  *   1) 用户显式切换过的那个（state.treeRootDir）
- *   2) 否则取最外层（路径最短）的根目录 —— 也就是项目根
- * 绝不取「最后新增的根目录」：那是打开文件时自动注册的子目录。
+ *   2) 否则取「第一个用户声明的根目录」（启动时的项目目录，或 --root / 📂 选的目录）
+ *   3) 都没有才退回任意第一个根目录
+ * 不取最后新增的：打开文件会把文件所在目录注册成根目录（auto），跟着它跑就会
+ * 「展开子目录点一下文件，父级目录消失」；也不按路径长短挑，否则 /tmp 下的临时目录
+ * 会比项目根还短，树就直接跑到 /tmp 去了。
  */
 function treeRoot() {
   const roots = state.roots || [];
   if (!roots.length) return null;
   const chosen = roots.find((item) => item.dir === state.treeRootDir);
   if (chosen) return chosen;
-  return roots.slice().sort((a, b) => a.dir.length - b.dir.length)[0];
+  return roots.find((item) => item.auto !== true) || roots[0];
 }
 
 function renderRoots() {
@@ -815,17 +818,21 @@ function renderRoots() {
   renderRootBar(root);
 }
 
-/** 根目录切换栏：多根目录时才出现，点一下就切文件树的根 */
+/**
+ * 根目录切换栏：只在「用户声明了多个根目录」时出现（打开文件时自动注册的临时目录不算），
+ * 否则平时不该多出一条东西来。
+ */
 function renderRootBar(current) {
   const bar = el.rootBar;
-  const roots = (state.roots || []).slice().sort((a, b) => a.dir.length - b.dir.length);
+  const roots = (state.roots || []).filter((item) => item.auto !== true);
   if (roots.length <= 1) {
     bar.hidden = true;
     bar.innerHTML = '';
     return;
   }
   bar.hidden = false;
-  bar.innerHTML = '';
+  bar.title = '文件树的根目录：点一下切换';
+  bar.innerHTML = '<span class="root-bar-label">根目录</span>';
   for (const item of roots) {
     const chip = document.createElement('button');
     chip.className = 'root-pill';
@@ -1659,6 +1666,8 @@ window.__PVS_PANEL__ = () => {
     treeRoot: treeRoot()?.dir || null,
     treeRows: document.querySelectorAll('#tree .node').length,
     treeSelected: state.treeSelected,
+    rootBarVisible: !el.rootBar.hidden,
+    rootBarText: el.rootBar.innerText.replace(/\s+/g, ' ').trim(),
     // 直接从 DOM 读当前高亮行：能证明「点击的瞬间就亮了」，而不是等文件装载完
     treeActivePath: document.querySelector('#tree .node.active')?.dataset?.path || null,
     codeSessions: [...state.codeSessions.entries()].map(([id, meta]) => ({ id, file: meta.file, chars: meta.text ? meta.text.length : 0 })),

@@ -206,8 +206,10 @@ async function runBatch(opts) {
         const absFile = path.resolve(item.file);
         if (!fs.existsSync(absFile)) throw new Error(`路径不存在：${item.file}`);
         item.root = fs.statSync(absFile).isDirectory() ? absFile : path.dirname(absFile);
+        item.autoRoot = true; // 由文件位置推导，不是用户选的目录
       }
-      if (item.root) manager.files.addRoot(item.root);
+      // 用户显式写的 root 算「声明」；下面按文件位置推导出来的只能算 auto
+      if (item.root) manager.files.addRoot(item.root, { auto: Boolean(item.autoRoot) });
 
       session = item.sessionId ? manager.get(item.sessionId) : null;
       if (!session) {

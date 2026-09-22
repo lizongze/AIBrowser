@@ -61,25 +61,34 @@ class FileService {
     this.counter = 0;
   }
 
-  addRoot(dir) {
+  /**
+   * 注册一个根目录。
+   * auto=true 表示「打开文件时顺带注册的目录」，只为让 pvs:// 能读到该文件，
+   * 不是用户选的项目目录 —— 文件树与根目录切换栏只看非 auto 的那些。
+   */
+  addRoot(dir, { auto = false } = {}) {
     const resolved = path.resolve(normalizePath(dir));
     for (const root of this.roots.values()) {
-      if (root.dir === resolved) return { root: root.dir, id: root.id };
+      if (root.dir === resolved) {
+        // 同一个目录后来被显式声明（用户选了它 / 传了 --root），升级成「非自动」
+        if (!auto && root.auto) root.auto = false;
+        return { root: root.dir, id: root.id };
+      }
     }
     this.counter += 1;
     const id = `r${this.counter}`;
-    this.roots.set(id, { id, dir: resolved, addedAt: Date.now() });
+    this.roots.set(id, { id, dir: resolved, auto: Boolean(auto), addedAt: Date.now() });
     return { root: resolved, id };
   }
 
   /** 以某个文件所在目录建立临时根目录（用于无根目录时直接预览文件） */
   addRootFor(dirOrFile, isFile = false) {
     const dir = isFile ? path.dirname(dirOrFile) : dirOrFile;
-    return this.addRoot(dir);
+    return this.addRoot(dir, { auto: true });
   }
 
   listRoots() {
-    return [...this.roots.values()].map(({ id, dir }) => ({ id, dir }));
+    return [...this.roots.values()].map(({ id, dir, auto }) => ({ id, dir, auto: Boolean(auto) }));
   }
 
   rootFor(id) {

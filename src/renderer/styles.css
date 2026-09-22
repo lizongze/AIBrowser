@@ -623,6 +623,13 @@ body.resizing {
   scrollbar-width: thin;
 }
 
+.root-bar-label {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
 .root-pill {
   flex: 0 0 auto;
   max-width: 132px;

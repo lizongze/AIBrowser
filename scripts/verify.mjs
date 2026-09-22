@@ -228,6 +228,26 @@ async function main() {
   const treeAll = (await api('tree', { dir: root, includeIgnored: true })).entries.map((e) => e.name);
   check(treeAll.some((name) => /^node_modules/i.test(name)), '需要时可以列出被忽略的目录', `--all 共 ${treeAll.length} 项`);
 
+  // 打开项目外的临时文件只会注册 auto 根目录：不许跑到文件树里、也不许在切换栏冒出来
+  // （用户看到过一个莫名的「pvs-edit-xxxx」胶囊，就是这种自动根目录）
+  const autoRootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pvs-auto-root-'));
+  const autoRootFile = path.join(autoRootDir, 'scratch.md');
+  fs.writeFileSync(autoRootFile, '# scratch\n');
+  const beforeAuto = await api('panelState');
+  const autoSession = await api('openCode', { file: autoRootFile });
+  await sleep(800);
+  const afterAuto = await api('panelState');
+  const autoRoot = (await api('roots')).roots.find((item) => item.dir === autoRootDir);
+  check(autoRoot?.auto === true, '打开项目外的文件只注册 auto 根目录', JSON.stringify(autoRoot?.dir || null));
+  check(
+    afterAuto.state.treeRoot === beforeAuto.state.treeRoot && afterAuto.state.rootBarVisible === false,
+    'auto 根目录不会进文件树也不会出现在切换栏',
+    `树根 ${path.basename(afterAuto.state.treeRoot || '')} · 切换栏可见=${afterAuto.state.rootBarVisible}`,
+  );
+  await api('close', { sessionId: autoSession.sessionId });
+  fs.rmSync(autoRootDir, { recursive: true, force: true });
+  await sleep(300);
+
   // 点击文件树里的文件：高亮必须在点击的瞬间就落在那一行（不等文件装载完）
   const clickReadme = await api('panelAction', { action: 'open-tree', payload: { name: 'README.md' } });
   check(
@@ -248,6 +268,9 @@ async function main() {
     '新增根目录不会让文件树跑到子目录里',
     `树根 ${path.basename(treeAfterRoot.state.treeRoot || '')} · ${treeBefore.state.treeRows} → ${treeAfterRoot.state.treeRows} 行`,
   );
+  const rootBar = await api('panelState');
+  check(rootBar.state.rootBarVisible === true && rootBar.state.rootBarText.includes('根目录'), '多根目录时出现根目录切换栏',
+    rootBar.state.rootBarText);
   const toExample = await api('panelAction', { action: 'set-tree-root', payload: { dir: examplesDir } });
   await sleep(500);
   const treeAtExample = await api('panelState');
