@@ -298,7 +298,12 @@ function registerIpc() {
       : !state.manager.hotReload;
     state.manager.setHotReload(enabled);
     config.write({ hotReload: enabled });
-    process.stderr.write(`[aibrowser] 热重载 ${enabled ? '已开启（轮询本地文件变化）' : '已关闭'}\n`);
+    if (enabled) {
+      const { describeExtensions } = require('./watch-scope');
+      process.stderr.write(`[aibrowser] 热重载 已开启（只盯面板里打开的文件 + 它加载的资源 · 600ms · 覆盖 ${describeExtensions()}）\n`);
+    } else {
+      process.stderr.write('[aibrowser] 热重载 已关闭\n');
+    }
     return { enabled };
   });
 

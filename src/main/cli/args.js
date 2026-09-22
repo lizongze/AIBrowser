@@ -16,6 +16,7 @@ const BOOLEAN_FLAGS = new Set([
   'help', 'version', 'json', 'new', 'daemon', 'gui', 'headless', 'no-spawn',
   'full-page', 'hard', 'clear', 'html', 'on', 'off', 'all', 'quiet', 'verbose', 'open', 'force-daemon',
   'hot-reload', 'no-hot-reload', 'win', 'wsl',
+  'fresh', 'keep',
   'fullscreen', 'no-fullscreen', 'show-sidebar',
 ]);
 
@@ -80,6 +81,7 @@ const HELP = `AIBrowser (pvs) — Chromium 网页预览 + 代码高亮预览，A
 
 用法:
   pvs open <file|url> [--root dir] [--new] [--json]      打开网页预览（自动识别 HTML / 目录 / URL）
+                                                          --fresh 打开前关掉所有旧面板；--keep 保留旧面板
   pvs code <file> [--line n] [--json]                     打开代码高亮预览
   pvs list [--json]                                       列出会话与已打开的项目目录
   pvs shot [sessionId] [--out file] [--format png|jpeg] [--full-page] [--selector css] [--json]
@@ -87,6 +89,7 @@ const HELP = `AIBrowser (pvs) — Chromium 网页预览 + 代码高亮预览，A
   pvs content [sessionId] [--selector css] [--html] [--json]   取渲染后的文本 / HTML
   pvs eval "<js>" [--session id] [--json]                 在页面里执行 JS
   pvs console [sessionId] [--clear] [--json]              读取控制台日志
+  pvs debugWatch [--json]                                 热重载当前关注哪些文件（tab 文件 + 页面引用的资源）
   pvs network [sessionId] [--on|--off] [--clear] [--json] 网络请求记录
   pvs reload [sessionId] [--hard] [--json]                重新加载
   pvs close [sessionId|--all] [--json]                    关闭会话

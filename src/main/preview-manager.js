@@ -145,7 +145,6 @@ class PreviewManager {
     const session = existing || this.create();
     if (existing) this.setFocus(existing.id);
     await session.load(target);
-    if (session.file) session.watchProjectDir(path.dirname(session.file));
     if (focus) this.setFocus(session.id);
     this.deps.broadcast('sessions:updated', { sessions: this.list() });
     this.deps.broadcast('ui:open', { sessionId: session.id, view: 'web' });

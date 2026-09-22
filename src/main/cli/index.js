@@ -108,6 +108,7 @@ async function commandOpen(args, flags) {
     target,
     force: flags.mode === 'code' ? 'code' : undefined,
     root: flags.root ? path.resolve(String(flags.root)) : undefined,
+    fresh: Boolean(flags.fresh) && !flags.keep,
   }, { state, timeoutMs: 30000 });
   if (flags.json) {
     jsonOut({ ok: true, spawned, ...result });
@@ -127,6 +128,7 @@ async function commandCode(args, flags) {
     target: String(raw),
     force: 'code',
     root: flags.root ? path.resolve(String(flags.root)) : undefined,
+    fresh: Boolean(flags.fresh) && !flags.keep,
   }, { state });
   if (flags.json) jsonOut({ ok: true, spawned, ...result });
   else out(`代码会话 [${result.sessionId}] ${result.file} (${result.language || result.kind})`);
@@ -183,6 +185,21 @@ async function commandShot(args, flags) {
     out('        node bin/pvs.js serve --gui    （或 npm run gui，然后在同一个服务里截图）');
   }
   if (flags.base64 && result.dataBase64) out(result.dataBase64);
+  return EXIT_OK;
+}
+
+async function commandDebugWatch(_args, flags) {
+  const { state } = await ensureTarget(targetOptions(flags));
+  const result = await send('debugWatch', { sessionId: flags.session }, { state });
+  if (flags.json) {
+    jsonOut({ ok: true, ...result });
+    return EXIT_OK;
+  }
+  out(`热重载：${result.enabled ? `开 · 每 ${result.intervalMs}ms 轮询` : '关'}`);
+  out(`  入口：${result.entry || '（无）'}`);
+  out(`  关注 ${result.files.length} 个文件（页面引用 ${result.pageAssets} 个 · 显式注册 ${result.extraFiles} 个）：`);
+  for (const file of result.files) out(`    ${file}`);
+  out(`  类型覆盖：${result.extensions}`);
   return EXIT_OK;
 }
 
@@ -406,6 +423,8 @@ const COMMANDS = {
   text: commandContent,
   eval: commandEval,
   console: commandConsole,
+  debugWatch: commandDebugWatch,
+  watch: commandDebugWatch,
   logs: commandConsole,
   network: commandNetwork,
   net: commandNetwork,

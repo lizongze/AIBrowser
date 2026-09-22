@@ -10,6 +10,36 @@ const { BrowserWindow, WebContentsView } = require('electron');
 const { PREVIEW_PARTITION } = require('./preview-protocol');
 const { detectLanguage } = require('./language');
 const { normalizePath } = require('./file-service');
+const { isWatchedFile, describeExtensions } = require('./watch-scope');
+
+// 在页面里收集它引用的本地资源。
+// 注意：Electron 对自定义 pvs:// 协议不产生 resource timing 条目（实测只有 navigation 与 http 请求），
+// 所以这里以 DOM 为准，再合并 resource timing（动态 fetch 出来的资源会出现在那里）。
+const PAGE_ASSET_SCRIPT = `(() => {
+  const out = new Set();
+  const push = (value) => {
+    if (!value) return;
+    try {
+      const abs = new URL(String(value), document.baseURI).href;
+      if (abs.startsWith('pvs://')) out.add(abs);
+    } catch (e) {}
+  };
+  const nodes = document.querySelectorAll(
+    'link[href], script[src], img[src], img[srcset], source[src], source[srcset], video[src], video[poster], audio[src], iframe[src], object[data], embed[src], use[href]'
+  );
+  for (const el of nodes) {
+    push(el.getAttribute('href'));
+    push(el.getAttribute('src'));
+    push(el.getAttribute('poster'));
+    push(el.getAttribute('data'));
+    const srcset = el.getAttribute('srcset');
+    if (srcset) for (const part of srcset.split(',')) push(part.trim().split(/\\s+/)[0]);
+  }
+  try {
+    for (const entry of performance.getEntriesByType('resource')) push(entry.name);
+  } catch (e) {}
+  return JSON.stringify([...out]);
+})()`;
 
 const DEFAULT_WIDTH = 1280;
 const DEFAULT_HEIGHT = 840;
@@ -67,6 +97,10 @@ class PreviewSession {
     this._poller = null;
     this._extraWatch = new Set();
     this._watchStamps = new Map();
+    // 热重载关注范围：core = 入口目录（每 2 次轮询），deep = 项目内递归扫描（每 N 次轮询）
+    // 关注集合 = tab 里的文件 + 页面实际加载过的本地资源 + 显式注册的文件
+    this._pageAssets = new Set();
+    this._tick = 0;
     this._pendingEval = null;
     this._sentRequestIds = new Map();
     this._attachCallbacks = [];
@@ -190,6 +224,8 @@ class PreviewSession {
       this.loading = false;
       this.syncMeta();
       this.emitChange();
+      // 页面加载完成后才知道它到底引用了哪些本地资源，这时才把它们纳入热重载
+      this.discoverPageAssets().catch(() => {});
     });
 
     wc.on('did-fail-load', (_e, code, description, validatedURL, isMainFrame) => {
@@ -363,8 +399,7 @@ class PreviewSession {
       throw err;
     });
     this.pendingLoad.catch(() => {});
-    this.watchProjectDir(path.dirname(this.file));
-    this.pollFiles(); // 建立 mtime 基线，避免首次轮询误判
+    this.pollFiles();         // 建立 mtime 基线，避免首次轮询误判
     this.startPolling();
     this.emitChange();
     return this;
@@ -385,9 +420,9 @@ class PreviewSession {
   setHotReload(enabled) {
     this.hotReload = Boolean(enabled);
     if (this.hotReload && this.hasHost) {
-      if (this.file) this.watchProjectDir(path.dirname(this.file));
       this.pollFiles();
       this.startPolling();
+      this.discoverPageAssets().catch(() => {});
     } else {
       this.stopPolling();
     }
@@ -400,7 +435,7 @@ class PreviewSession {
     if (this._poller) return; // 面板会话与无头会话都需要热重载，不按宿主区分
     this._poller = setInterval(() => {
       try {
-        this.pollFiles();
+        this.pollOnce();
       } catch {
         /* 轮询异常不能影响主进程 */
       }
@@ -408,18 +443,44 @@ class PreviewSession {
     if (typeof this._poller.unref === 'function') this._poller.unref();
   }
 
-  pollFiles() {
+  /**
+   * 一次轮询：只看「我们 tab 里真正打开/加载过的文件」。
+   *   - 会话对应的文件（tab 里的那个，任何类型都听）
+   *   - 页面实际请求过的本地资源（CSS/JS/图片……，由 discoverPageAssets 反查得到）
+   *   - 显式 watchFile 注册的文件
+   * 不扫描项目目录：开销与「文件类型覆盖」无关的那部分噪音（日志、构建产物）不该触发刷新。
+   */
+  pollOnce() {
+    this._tick += 1;
+    this.checkFiles(this.watchTargets());
+    // 每 10 次（约 6s）重新看一眼页面引用了什么：动态插入的 link/script 也能跟上
+    if (this._tick % 10 === 0) this.discoverPageAssets().catch(() => {});
+  }
+
+  /** 当前关注的完整文件集合 */
+  watchTargets() {
     const targets = new Set();
     if (this.file) targets.add(this.file);
+    for (const file of this._pageAssets) targets.add(file);
     for (const file of this._extraWatch) targets.add(file);
-    for (const file of targets) {
-      let stamp = null;
-      try {
-        const info = fssync.statSync(file);
-        stamp = `${info.mtimeMs}:${info.size}`;
-      } catch {
-        stamp = 'missing';
-      }
+    return targets;
+  }
+
+  /** mtime + size 指纹：WSL 的 9p 上 mtime 精度有限，加上 size 更稳 */
+  stampOf(file) {
+    try {
+      const info = fssync.statSync(file);
+      return `${info.mtimeMs}:${info.size}`;
+    } catch {
+      return 'missing';
+    }
+  }
+
+  /** 比对指纹；首次见到只建立基线。返回是否发生变化（并触发刷新） */
+  checkFiles(files) {
+    let changed = null;
+    for (const file of files) {
+      const stamp = this.stampOf(file);
       const previous = this._watchStamps.get(file);
       if (previous === undefined) {
         this._watchStamps.set(file, stamp);
@@ -427,31 +488,77 @@ class PreviewSession {
       }
       if (previous !== stamp) {
         this._watchStamps.set(file, stamp);
-        this.scheduleReload(`文件变化：${path.basename(file)}`);
-        break;
+        if (!changed) changed = file;
       }
     }
+    if (changed) this.scheduleReload(`文件变化：${path.basename(changed)}`);
+    return Boolean(changed);
   }
 
-  /** 关注某个文件（页面引用的 CSS/JS 等） */
+  /** 保持旧名可用 */
+  pollFiles() {
+    this.pollOnce();
+  }
+
+  /** 关注某个文件（页面引用的 CSS/JS 等，也可由调用方显式注册） */
   watchFile(file) {
     if (file) this._extraWatch.add(file);
   }
 
-  /** 关注整个项目目录里的常见静态资源（HTML/CSS/JS/SVG），供预览站点时自动刷新 */
-  watchProjectDir(dir) {
-    if (!dir) return;
-    let entries = [];
+  /**
+   * 找出这个页面真正加载过的本地资源，加入关注集合。
+   * 用 performance.resource 而不是「扫同目录」：只有页面真的用到的 CSS/JS/图片才算数，
+   * 同目录里没被引用的文件改了不该刷新，页面没加载完的资源也不会误报。
+   * 资源类型仍走白名单（见 watch-scope.js）：日志之类的高频写入不该触发刷新。
+   */
+  async discoverPageAssets() {
+    if (!this.hotReload || !this.hasHost || this.kind === 'code') return [];
+    if (this.webContents.isDestroyed()) return [];
+    let urls = [];
     try {
-      entries = fssync.readdirSync(dir, { withFileTypes: true });
+      const raw = await this.webContents.executeJavaScript(PAGE_ASSET_SCRIPT, true);
+      urls = JSON.parse(raw || '[]');
     } catch {
-      return;
+      return [];
     }
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      if (!/\.(html?|xhtml|svg|css|m?js|cjs|json|txt|md)$/i.test(entry.name)) continue;
-      this.watchFile(path.join(dir, entry.name));
+    const found = new Set();
+    for (const url of urls) {
+      try {
+        const parsed = new URL(url);
+        const resolved = await this.ctx.files.resolveInRoot(parsed.host, parsed.pathname);
+        if (!resolved || !resolved.file) continue;
+        // 类型仍走白名单：日志之类的高频写入不该触发刷新
+        if (!isWatchedFile(path.basename(resolved.file))) continue;
+        if (this.file && path.resolve(resolved.file) === path.resolve(this.file)) continue;
+        found.add(path.resolve(resolved.file));
+      } catch {
+        /* 反查不到就跳过：不是本地资源 */
+      }
     }
+    this._pageAssets = found;
+    // 新进来的资源先建立基线，避免「刚被引用」就被当成变化
+    for (const file of found) if (!this._watchStamps.has(file)) this._watchStamps.set(file, this.stampOf(file));
+    // 页面已经不再引用的资源，丢掉基线，避免 Map 无限增长
+    for (const file of [...this._watchStamps.keys()]) {
+      if (file === this.file || found.has(file) || this._extraWatch.has(file)) continue;
+      this._watchStamps.delete(file);
+    }
+    this.emitChange();
+    return [...found];
+  }
+
+  /** 热重载覆盖情况（日志、pvs status、验收都用它） */
+  watchInfo() {
+    const targets = [...this.watchTargets()];
+    return {
+      enabled: this.hotReload,
+      entry: this.file,
+      intervalMs: 600,
+      files: targets,
+      pageAssets: this._pageAssets.size,
+      extraFiles: this._extraWatch.size,
+      extensions: describeExtensions(),
+    };
   }
 
   scheduleReload(reason) {

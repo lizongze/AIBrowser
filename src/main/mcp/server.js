@@ -72,6 +72,7 @@ const TOOLS = [
         target: { type: 'string', description: '要打开的目标：网页地址、本地文件路径或目录（Windows 路径如 D:\\dir\\a.html 也支持）' },
         root: { type: 'string', description: '授权根目录（可选；本地文件的相对资源需要）' },
         force: { type: 'string', enum: ['web', 'code'], description: '强制预览方式，一般不用传' },
+        fresh: { type: 'boolean', description: '打开前关闭所有已有面板（默认 true；需要保留多个标签时传 false）' },
       },
       required: ['target'],
     },
@@ -217,6 +218,7 @@ async function handleTool(name, args) {
         file: args.target === undefined ? args.file : undefined,
         root: args.root,
         force: args.force,
+        fresh: args.fresh !== false,
       });
       return textResult(result);
     }

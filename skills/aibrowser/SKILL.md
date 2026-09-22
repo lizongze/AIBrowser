@@ -28,6 +28,10 @@ bash scripts/ensure-service.sh      # 确保后台服务已就绪（幂等，见
 `$PVS_HOME` → `$AIBROWSER_HOME` → 同仓库内的副本 → `PATH` 里的 `pvs`。
 若都找不到，向用户询问项目路径并设置 `export PVS_HOME=/path/to/aibrowser`。
 
+**一条命令 = 一个面板（重要）**：本 skill 的 `scripts/pvs.sh` 会给 `open` / `code` 自动加 `--fresh` ——
+打开新文件前先关掉之前所有面板，避免 AI 连开几个文件后堆出一排标签（热重载也只盯当前这个文件）。
+需要保留多标签时加 `--keep`，或 `AIBROWSER_KEEP_TABS=1 bash scripts/pvs.sh open ...`。
+
 **面板服务 vs 无头服务（影响截图长什么样）**：`ensure-service.sh` 默认优先启动**面板服务（GUI）**——
 有 `DISPLAY` / `WAYLAND_DISPLAY` 就开面板窗口，这样代码截图是**整块面板**（标签条 + 行号栏 + 文件地址），
 和用户屏幕上看到的一致。纯无头服务没有窗口，代码截图会回退成 `pvs://code/` 代码页，**只有文件内容、没有标签条**。
@@ -42,6 +46,7 @@ bash scripts/ensure-service.sh      # 确保后台服务已就绪（幂等，见
 P=scripts/pvs.sh          # 本 skill 的包装脚本，等价于 pvs
 
 # 打开：直接把目标交给工具，不需要自己判断是文件还是 URL
+#       （skill 包装脚本默认 --fresh：先关掉旧面板；要保留多标签就加 --keep）
 $P open ./index.html --root . --json
 $P open https://example.com/ --json
 $P open 'D:\dir\page.html' --json          # Windows 路径也可以
@@ -60,6 +65,7 @@ $P shot --out /tmp/page.png --full-page --json
 $P shot --selector ".card" --out /tmp/card.png --json
 
 # 排错
+$P debugWatch --json             # 热重载当前盯着哪些文件（tab 里的文件 + 页面引用的资源）
 $P console --json
 $P network --on && $P reload && $P network --json
 

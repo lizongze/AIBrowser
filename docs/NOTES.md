@@ -145,7 +145,12 @@ electron . --hot-reload          # 启动时开启（与配置一起生效，参
 ```
 
 状态持久化在运行时目录的 `config.json`（`hotReload`）。可用 `--no-hot-reload` 关闭，或 `--hot-reload` 强制开启。
-开启后每 0.6s 轮询被预览文件所在目录中的 `html/css/js/json/svg/md`，变化即自动刷新页面。
+开启后每 0.6s 比对**面板（tab）里打开的文件 + 该页面实际引用的本地资源**的 mtime+size 指纹，变化即自动刷新页面。
+不扫描项目目录：没打开、也没被页面引用的文件改了不会触发刷新（避免日志/构建产物把预览刷成幻灯片）。
+页面引用的资源在 `did-finish-load` 之后从 DOM（`link/script/img/source/video/iframe…`）读出来 ——
+Electron 对自定义 `pvs://` 协议不产生 resource timing 条目，只能读 DOM，再合并 resource timing 兜住动态请求。
+资源类型白名单见 `src/main/watch-scope.js`（前端 / 样式 / 模板 / 后端 / 数据接口 / 测试 / 配置 / 文档 / 资源，共 9 类 160 种后缀）。
+查看当前范围：`pvs debugWatch`（HTTP 同名的 `debugWatch` 动作）。
 
 ## 代码文件截图
 

@@ -364,6 +364,8 @@ class ControlServer {
         return { pong: true, pid: process.pid, mode: this.mode, version: VERSION, chrome: process.versions.chrome, port: this.port };
 
       case 'open': {
+        // fresh：先关掉所有旧会话，只留这一次打开的面板（AI 一条命令一个面板，不堆标签）
+        if (params.fresh) manager.closeAll();
         // target 是统一入口：调用方不必区分文件还是 URL；file/url 仍兼容
         if (params.target !== undefined && params.file === undefined && params.url === undefined) {
           const { kind, session } = await manager.openSmart({
@@ -372,7 +374,6 @@ class ControlServer {
             root: params.root,
             focus: params.focus !== false,
           });
-          if (session.file) session.watchProjectDir(path.dirname(session.file));
           return {
             sessionId: session.id,
             kind,
@@ -390,11 +391,11 @@ class ControlServer {
           focus: params.focus !== false,
           sessionId: params.sessionId || null,
         });
-        if (session.file) session.watchProjectDir(path.dirname(session.file));
         return { sessionId: session.id, kind: session.kind, url: session.info().url, title: session.title, file: session.file };
       }
 
       case 'openCode': {
+        if (params.fresh) manager.closeAll();
         const session = await manager.openCode({
           file: params.file,
           root: params.root,
@@ -406,6 +407,7 @@ class ControlServer {
       }
 
       case 'openPath': {
+        if (params.fresh) manager.closeAll();
         const { kind, session } = await manager.openPath(params.path || params.file, { force: params.force, root: params.root });
         return { sessionId: session.id, kind, file: session.file, url: session.info().url, title: session.title };
       }
@@ -601,6 +603,12 @@ class ControlServer {
 
       case 'logs':
         return { mode: this.mode, pid: process.pid, port: this.port, socket: socketPath(), token: this.token, runtimeDir: runtimeDir() };
+
+      // 热重载覆盖情况：面板里当前盯着哪些文件、类型覆盖多少（验收与自查用）
+      case 'debugWatch': {
+        const session = manager.resolve(params.sessionId);
+        return { mode: this.mode, ...session.watchInfo() };
+      }
 
       case 'panelRead': {
         const win = this.manager.guiWindow;

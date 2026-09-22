@@ -246,6 +246,58 @@ async function main() {
   // 热重载：默认关闭，开启后文件变化会自动刷新
   const hotDefault = await api('panelState');
   check(hotDefault.state.hotReload === true, '热重载默认开启', String(hotDefault.state.hotReload));
+
+  // 关注范围：只盯面板里打开的文件 + 该页面实际加载的本地资源（不扫项目目录）
+  await api('openPath', { path: htmlFile });
+  await waitFor(async () => {
+    const s = await api('panelState');
+    return s.state.view === 'web' ? { ok: true } : { ok: false };
+  }, { label: '切到网页会话' });
+  const scope = await waitFor(async () => {
+    const w = await api('debugWatch');
+    return w.files.length >= 3 ? { ok: true, watch: w } : { ok: false, watch: w };
+  }, { label: '热重载范围', timeoutMs: 8000 });
+  const watched = (scope.watch?.files || []).map((f) => path.basename(f));
+  check(
+    scope.watch?.entry === htmlFile && watched.includes('demo.css') && watched.includes('demo.js'),
+    '热重载范围 = 面板里的文件 + 页面实际引用的资源',
+    `关注 ${watched.join(', ')}`,
+  );
+  check(
+    !(scope.watch?.files || []).some((f) => f.includes('node_modules')),
+    '热重载不会去扫项目/依赖目录',
+    `${scope.watch?.files?.length || 0} 个文件 · 覆盖 ${scope.watch?.extensions}`,
+  );
+  const cssFile = path.join(root, 'examples', 'demo.css');
+  const cssOriginal = fs.readFileSync(cssFile, 'utf8');
+  fs.writeFileSync(cssFile, `${cssOriginal}\n/* pvs-verify-probe */\n`);
+  const assetReload = await waitFor(async () => {
+    const entries = await api('console');
+    return entries.entries.some((e) => e.text.includes('热重载') && e.text.includes('demo.css'))
+      ? { ok: true } : { ok: false };
+  }, { label: '改被引用的 CSS 触发热重载', timeoutMs: 8000 });
+  fs.writeFileSync(cssFile, cssOriginal);
+  check(assetReload.ok, '改页面引用的 CSS 会触发热重载');
+  // 没在面板里打开、页面也没引用的文件不该触发刷新
+  await api('console');
+  const untouchedFile = path.join(root, 'src', 'main', 'language.js');
+  const untouchedOriginal = fs.readFileSync(untouchedFile, 'utf8');
+  fs.writeFileSync(untouchedFile, `${untouchedOriginal}\n// pvs-verify-probe\n`);
+  await sleep(2200);
+  const unrelated = await api('console');
+  const gotReload = unrelated.entries.some((e) => e.text.includes('热重载') && e.text.includes('language.js'));
+  fs.writeFileSync(untouchedFile, untouchedOriginal);
+  check(!gotReload, '没打开也没被引用的文件改了不触发刷新', `${unrelated.entries.length} 条日志`);
+
+  // 单面板：fresh 会先关掉所有旧会话（skill 的 pvs.sh 默认带 --fresh）
+  await api('open', { target: htmlFile, fresh: false });
+  await api('open', { target: codeFile, force: 'code', fresh: true });
+  const afterFresh = await api('list');
+  check(
+    afterFresh.sessions.length === 1 && afterFresh.sessions[0].kind === 'code',
+    'fresh 打开会关掉之前所有面板',
+    `${afterFresh.sessions.length} 个会话 · ${afterFresh.sessions.map((x) => x.title).join(', ')}`,
+  );
   // 默认开启时改文件应当自动刷新
   await api('openPath', { path: htmlFile });
   await waitFor(async () => {
