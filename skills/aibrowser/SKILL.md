@@ -28,6 +28,12 @@ bash scripts/ensure-service.sh      # 确保后台服务已就绪（幂等，见
 `$PVS_HOME` → `$AIBROWSER_HOME` → 同仓库内的副本 → `PATH` 里的 `pvs`。
 若都找不到，向用户询问项目路径并设置 `export PVS_HOME=/path/to/aibrowser`。
 
+**面板服务 vs 无头服务（影响截图长什么样）**：`ensure-service.sh` 默认优先启动**面板服务（GUI）**——
+有 `DISPLAY` / `WAYLAND_DISPLAY` 就开面板窗口，这样代码截图是**整块面板**（标签条 + 行号栏 + 文件地址），
+和用户屏幕上看到的一致。纯无头服务没有窗口，代码截图会回退成 `pvs://code/` 代码页，**只有文件内容、没有标签条**。
+需要纯无头（CI、无显示环境）时用 `AIBROWSER_GUI=0 bash scripts/ensure-service.sh`。
+服务是常驻进程：仓库代码比服务新、或服务模式不是想要的，`ensure-service.sh` 会自动重启它。
+
 ## 核心命令
 
 所有命令都支持 `--json`（**单行 JSON，直接可解析**）。stdout 只有结果，stderr 只有日志。
@@ -59,7 +65,9 @@ $P network --on && $P reload && $P network --json
 
 # 代码文件预览（高亮）
 $P code ./src/app.ts --line 42 --json
-$P shot --out /tmp/app.png --full-page --json    # 代码文件也能截图（内部渲染成高亮页面）
+$P shot --out /tmp/app.png --json                # 代码文件也能截图；shot 的 JSON 里有 source 字段：
+                                                #   panel     = 面板截图（标签条 + 行号栏，GUI 服务）
+                                                #   code-page = 无面板，只有文件内容（无头服务）
 ```
 
 ## 批量处理清单（推荐）

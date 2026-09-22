@@ -46,7 +46,7 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 | `focus` / `close` | `sessionId`（`close` 支持 `all:true`） | `{sessionId}` / `{closed}` |
 | `reload` | `sessionId`、`hard` | `{sessionId,url}` |
 | `navigate` | `sessionId`、`url`/`file`/`back`/`forward` | `{sessionId,url}` |
-| `screenshot` | `sessionId`、`format`、`fullPage`、`selector`、`out` | `{filePath,width,height,bytes,dataBase64}` |
+| `screenshot` | `sessionId`、`format`、`fullPage`、`selector`、`out` | `{filePath,width,height,bytes,dataBase64,source}`；`source=panel` 表示截的是整块面板（GUI 服务，含标签条），`code-page` 表示无头服务下的代码页渲染（只有文件内容） |
 | `content` | `selector`、`format:'text'\|'html'` | `{text,length,truncated}` |
 | `eval` | `expression` | `{value,type}`（值是字符串） |
 | `console` | `sessionId`、`clear` | `{entries:[{level,text,ts}]}` |

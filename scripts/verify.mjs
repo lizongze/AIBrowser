@@ -33,13 +33,24 @@ function readState() {
 }
 
 async function api(action, params = {}) {
-  const state = readState();
-  if (!state) throw new Error('控制入口未就绪');
-  const response = await fetch(`http://127.0.0.1:${state.port}/${action}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-pvs-token': state.token },
-    body: JSON.stringify(params),
-  });
+  // WSLg 下偶发 X/窗口层抖动会让单次请求直接 fetch failed；这类瞬时断连重试一次，
+  // 真死了（进程退出）重试还是会失败，不会掩盖问题。
+  let response;
+  for (let attempt = 0; ; attempt += 1) {
+    const state = readState();
+    if (!state) throw new Error('控制入口未就绪');
+    try {
+      response = await fetch(`http://127.0.0.1:${state.port}/${action}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-pvs-token': state.token },
+        body: JSON.stringify(params),
+      });
+      break;
+    } catch (err) {
+      if (attempt >= 1) throw err;
+      await sleep(600);
+    }
+  }
   const payload = await response.json();
   if (!payload.ok) throw new Error(payload.error);
   // 自动化连续操作比人手快得多，会给界面叠加一串瞬态（表现为连续闪烁）。

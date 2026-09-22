@@ -501,7 +501,15 @@ class ControlServer {
         });
         // 代码会话回退到代码页截图后，恢复到原本的会话标识，界面不应显示成 pvs://code/
         if (session.kind === 'code' && urlBefore) session.url = urlBefore;
-        const result = { sessionId: shot.sessionId, format: shot.format, width: shot.width, height: shot.height, bytes: shot.bytes };
+        const result = {
+          sessionId: shot.sessionId,
+          format: shot.format,
+          width: shot.width,
+          height: shot.height,
+          bytes: shot.bytes,
+          // 这里没有面板可截：代码会话是 pvs://code/ 代码页渲染，网页会话是离屏/原生视图
+          source: session.kind === 'code' ? 'code-page' : 'render',
+        };
         if (params.raw) return { ...result, buffer: shot.buffer };
         if (params.out !== undefined || params.out === null) {
           const out = params.out ? path.resolve(String(params.out)) : path.join(os.tmpdir(), `pvs-${session.id}-${Date.now()}.${shot.format}`);

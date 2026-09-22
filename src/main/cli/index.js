@@ -169,11 +169,19 @@ async function commandShot(args, flags) {
 
   const result = await send('screenshot', params, { state, timeoutMs: 60000 });
   if (flags.json) {
-    jsonOut({ ok: true, sessionId: result.sessionId, filePath: result.filePath, width: result.width, height: result.height, bytes: result.bytes, format: result.format });
+    jsonOut({ ok: true, sessionId: result.sessionId, filePath: result.filePath, width: result.width, height: result.height, bytes: result.bytes, format: result.format, source: result.source });
     return EXIT_OK;
   }
-  out(`截图完成 · ${result.width}×${result.height} · ${humanSize(result.bytes)}`);
+  const fromPanel = result.source === 'panel';
+  const label = fromPanel ? '面板截图（含标签条）'
+    : result.source === 'code-page' ? '代码页渲染（无面板，只有文件内容）' : '渲染截图';
+  out(`截图完成 · ${result.width}×${result.height} · ${humanSize(result.bytes)} · ${label}`);
   if (result.filePath) out(`  已保存：${result.filePath}`);
+  // 无头服务没有面板窗口，代码会话只能截 pvs://code/ 代码页，容易被误认为「没截到面板」
+  if (!fromPanel && result.source === 'code-page') {
+    out('  提示：当前是纯无头服务（没有面板窗口）。想要带标签条的整块面板截图，先开 GUI：');
+    out('        node bin/pvs.js serve --gui    （或 npm run gui，然后在同一个服务里截图）');
+  }
   if (flags.base64 && result.dataBase64) out(result.dataBase64);
   return EXIT_OK;
 }
@@ -260,6 +268,7 @@ async function commandStatus(_args, flags) {
     token: state?.token ?? null,
     mode: state?.mode ?? null,
     version: state?.version ?? null,
+    startedAt: state?.startedAt ?? null,
     endpoint: state?.port ? `http://127.0.0.1:${state.port}` : null,
     sessions: null,
   };
