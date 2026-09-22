@@ -441,6 +441,16 @@ function applyTheme(theme) {
   window.api.ui.setTheme(state.theme).catch(() => {});
 }
 
+/** 消耗聚焦中的空标签（有才动；其它空标签保留） */
+function consumeActiveDraft() {
+  if (!state.activeDraft) return false;
+  state.drafts = state.drafts.filter((item) => item !== state.activeDraft);
+  state.activeDraft = null;
+  renderTabs();
+  renderSessionList();
+  return true;
+}
+
 function nextFrame() {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
@@ -689,11 +699,7 @@ async function activateSession(id, { force = false } = {}) {
     return;
   }
   state.activeId = id;
-  // 打开真实会话后，聚焦中的空标签让位（其它空标签保留）
-  if (state.activeDraft) {
-    state.drafts = state.drafts.filter((item) => item !== state.activeDraft);
-    state.activeDraft = null;
-  }
+  consumeActiveDraft(); // 打开真实会话后，聚焦中的空标签让位（其它空标签保留）
   el.address.value = session.file || session.url || '';
   setOpenMode(isCode ? 'code' : 'web');
   window.api.sessions.focus(id).catch(() => {});
@@ -815,10 +821,17 @@ function setOpenMode(mode) {
 
 // ---------------------------------------------------------------- 打开目标
 
+/**
+ * 打开目标。
+ * 关键：如果当前有聚焦的空标签，**在创建会话之前**就把它消耗掉。
+ * 否则从「会话已创建」到「activateSession 清理空标签」之间存在约半秒的窗口，
+ * 标签条会渲染成「空标签 + 新标签」，看起来就是「回车后多出了几个标签」。
+ */
 async function openTarget(value, mode) {
   const text = String(value || '').trim();
   if (!text) return;
   setStatus(`打开中 ${shortPath(text, 30)}…`, 'busy');
+  consumeActiveDraft();
   try {
     // 本地存在的路径优先（避免 README.md / package.json 被当成域名）
     const localStat = looksLikeUrl(text) ? await window.api.files.stat(text).catch(() => null) : null;
