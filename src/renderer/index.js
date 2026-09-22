@@ -70,7 +70,7 @@ const state = {
   editors: new Map(), // file -> EditorView
   view: 'web',
   sidebar: false, // 默认隐藏左侧文件树，专注预览内容
-  contentOnly: false, // 全屏预览：隐藏标题栏与工具栏，只留标签条
+  contentOnly: true, // 全屏预览：隐藏标题栏与工具栏，只留标签条（默认开启）
   uiScale: 1, // 面板界面缩放（Ctrl+滚轮 / Ctrl+Shift+= / Ctrl+0）
   hotReload: false, // 热重载默认关闭，按需开启
   consoleTab: 'console',
@@ -1114,7 +1114,7 @@ function wireEvents() {
  * 全屏预览：隐藏标题栏与工具栏（保留标签条），把竖直空间全部让给预览内容。
  * 再点一次图标或按 Ctrl+Shift+M 还原。
  */
-function toggleContentOnly(force) {
+function toggleContentOnly(force, { persist = true } = {}) {
   const next = typeof force === 'boolean' ? force : !state.contentOnly;
   state.contentOnly = next;
   el.body.classList.toggle('content-only', next);
@@ -1125,6 +1125,7 @@ function toggleContentOnly(force) {
   if (next) setView(session && session.kind === 'code' ? 'code' : 'web');
   state.lastLayout = null; // 标题栏/工具栏消失会改变槽位，强制重算
   requestAnimationFrame(() => syncNativeView());
+  if (persist) window.api.ui.setContentOnly(next).catch(() => {});
   setStatus(next ? '全屏预览：按 Esc 或 Ctrl+Shift+M 还原' : '已退出全屏预览', 'ok');
 }
 
@@ -1198,7 +1199,7 @@ function setSidebar(visible, { notify = true } = {}) {
   el.btnSidebar.title = state.sidebar ? '隐藏文件树 (Ctrl+B)' : '显示文件树 (Ctrl+B)';
   state.lastLayout = null; // 侧栏开关会改变槽位，强制重算
   requestAnimationFrame(() => syncNativeView());
-  if (notify) window.api.ui.toggleSidebar(state.sidebar).catch(() => {});
+  if (notify) window.api.ui.toggleSidebar(state.sidebar).catch(() => {}); // 主进程会持久化
 }
 
 async function pickFolder() {
@@ -1422,6 +1423,7 @@ window.__PVS_PANEL__ = () => {
     openMode: state.openMode || 'web',
     uiScale: state.uiScale,
     hotReload: state.hotReload,
+    contentOnly: state.contentOnly,
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
     dataView: document.body.dataset.view,
@@ -1467,6 +1469,8 @@ async function boot() {
     const zoom = await window.api.ui.info();
     if (zoom && typeof zoom.zoomFactor === 'number') state.uiScale = zoom.zoomFactor;
     if (zoom && typeof zoom.hotReload === 'boolean') setHotReload(zoom.hotReload);
+    if (zoom && typeof zoom.contentOnly === 'boolean') state.contentOnly = zoom.contentOnly;
+    if (zoom && typeof zoom.sidebar === 'boolean') state.sidebar = zoom.sidebar;
   } catch {
     /* ignore */
   }
@@ -1481,7 +1485,9 @@ async function boot() {
   setSideTab('files');
   setConsoleTab('console');
   setOpenMode('web');
-  setSidebar(false); // 默认隐藏文件树
+  // 默认全屏 + 隐藏文件树（可在 config.json 或运行时切换）
+  toggleContentOnly(state.contentOnly, { persist: false });
+  setSidebar(state.sidebar, { notify: false });
   await refreshSessions();
   renderRoots();
   await renderTree();

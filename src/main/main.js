@@ -307,8 +307,15 @@ function registerIpc() {
     return { factor: next, saved: saved.uiScale };
   });
 
+  handle('ui:contentOnly', (payload) => {
+    const enabled = payload.enabled !== false;
+    config.write({ contentOnly: enabled });
+    return { enabled };
+  });
+
   handle('ui:sidebar', (payload) => {
     const visible = payload.visible !== false;
+    config.write({ sidebar: visible });
     broadcast('ui:sidebar', { visible });
     return { visible };
   });
@@ -347,6 +354,8 @@ function registerIpc() {
   handle('ui:info', () => ({
     zoomFactor: state.window && !state.window.isDestroyed() ? state.window.webContents.getZoomFactor() : 1,
     hotReload: state.manager ? state.manager.hotReload : false,
+    contentOnly: config.read().contentOnly !== false,
+    sidebar: config.read().sidebar === true,
     shortcut: {
       openFolder: 'Ctrl/Cmd+O',
       reload: 'Ctrl/Cmd+R',
@@ -429,6 +438,18 @@ async function bootstrap() {
   createManager();
   // 无头模式使用离屏渲染：窗口隐藏且不进任务栏，桌面上不会闪现
   if (isHeadless) state.manager.setHost('offscreen');
+
+  // 全屏预览与文件树：命令行参数优先于持久化配置（默认：全屏开、文件树关）
+  {
+    const cfg = config.read();
+    const fullscreen = flags['no-fullscreen'] === true ? false
+      : flags.fullscreen === true ? true
+        : cfg.contentOnly !== false;
+    const showSidebar = flags['show-sidebar'] === true ? true
+      : flags['hide-sidebar'] === true ? false
+        : cfg.sidebar === true;
+    config.write({ contentOnly: fullscreen, sidebar: showSidebar });
+  }
 
   // 热重载：命令行 --hot-reload / --no-hot-reload 优先，否则用持久化配置（默认关闭）
   const configHotReload = flags['hot-reload'] === true ? true

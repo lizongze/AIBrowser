@@ -107,6 +107,19 @@ fc-cache -f ~/.fonts
 
 `Cascadia Code`（微软开源）与 `Consolas` 都可自由分发；`msyh.ttc` 仅建议在本机使用，不要随项目分发。
 
+## 默认界面状态（面向 AI 截图与自动化）
+
+为了「打开即用于预览/截图」，默认值如下，并持久化在运行时目录的 `config.json`：
+
+| 配置 | 默认 | 效果 | 命令行覆盖 |
+| --- | --- | --- | --- |
+| `contentOnly` | **true** | 全屏预览：隐藏标题栏与工具栏，只留标签条 → 内容区从顶部 32px 开始 | `--no-fullscreen` / `--fullscreen` |
+| `sidebar` | **false** | 不显示左侧文件树 | `--show-sidebar` |
+| `hotReload` | false | 热重载关闭 | `--hot-reload` / `--no-hot-reload` |
+| `uiScale` | 1 | 界面缩放 100% | `Ctrl+滚轮` |
+
+全屏模式下按 `Esc` 或 `Ctrl+Shift+M` 可临时退出查看完整界面（退出状态会持久化）。
+
 ## 热重载
 
 默认**关闭**（不做任何文件轮询）。三种开启方式：

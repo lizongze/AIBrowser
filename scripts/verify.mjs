@@ -213,36 +213,47 @@ async function main() {
   fs.writeFileSync(htmlFile, originalHtml);
   check(stillOld.value === 'false', '关闭后改文件不再刷新');
 
-  // 全屏预览：需要在「网页会话」下测（代码面板没有原生视图，槽位为 0）
+  // 全屏预览：默认就是开启的（隐藏标题栏与工具栏，只留标签条）
   await api('openPath', { path: htmlFile });
   await waitFor(async () => {
     const state = await api('panelState');
     return state.state.view === 'web' ? { ok: true } : { ok: false };
   }, { label: '切到网页会话' });
-  const beforeFull = await api('debugLayout');
-  await api('panelAction', { action: 'content-only', payload: { visible: true } });
-  await sleep(800);
-  const full = await waitFor(async () => {
+  const fullscreenDefault = await api('debugLayout');
+  const panelDefault = await api('panelState');
+  check(panelDefault.state.contentOnly === true, '默认处于全屏预览（无标题栏/工具栏）', `contentOnly=${panelDefault.state.contentOnly}`);
+  check(fullscreenDefault.slot.top <= 40, '默认全屏：内容从顶部开始', `top=${fullscreenDefault.slot.top}`);
+
+  // 退出全屏 → 标题栏与工具栏回来，内容下移
+  await api('panelAction', { action: 'content-only', payload: { visible: false } });
+  const normal = await waitFor(async () => {
     const layout = await api('debugLayout');
-    return layout.slot.top < beforeFull.slot.top ? { ok: true, value: layout } : { ok: false, value: layout };
-  }, { label: '全屏生效' }).then((r) => r.value);
-  check(full.slot.top < beforeFull.slot.top, '全屏预览：标题栏与工具栏隐藏，内容上移',
-    `top ${beforeFull.slot.top} → ${full.slot.top}（隐藏 ${beforeFull.slot.top - full.slot.top}px）`);
-  check(full.slot.height > beforeFull.slot.height, '全屏后内容区变高',
-    `height ${beforeFull.slot.height} → ${full.slot.height}`);
-  const fullAligned = await waitFor(async () => {
+    return layout.slot.top > fullscreenDefault.slot.top ? { ok: true, value: layout } : { ok: false, value: layout };
+  }, { label: '退出全屏' }).then((r) => r.value);
+  check(normal.slot.top > fullscreenDefault.slot.top, '退出全屏后标题栏与工具栏恢复、内容下移',
+    `top ${fullscreenDefault.slot.top} → ${normal.slot.top}（+${normal.slot.top - fullscreenDefault.slot.top}px）`);
+  const normalAligned = await waitFor(async () => {
     const layout = await api('debugLayout');
     const v = layout.activeViewBounds;
     return v && Math.abs(v.y - layout.slot.top) <= 2 && Math.abs(v.width - layout.slot.width) <= 2
       ? { ok: true, detail: `view ${v.width}×${v.height} · slot ${Math.round(layout.slot.width)}×${Math.round(layout.slot.height)}` }
-      : { ok: false, detail: `view=${JSON.stringify(v)} slot top=${layout.slot.top} w=${Math.round(layout.slot.width)}` };
-  }, { label: '全屏对齐' });
-  check(fullAligned.ok, '全屏后原生视图与槽位仍然对齐', fullAligned.detail);
-  // 用真实 Esc 按键退出全屏（走完整键盘事件链路）
+      : { ok: false, detail: `view=${JSON.stringify(v)} slot top=${layout.slot.top}` };
+  }, { label: '普通模式对齐' });
+  check(normalAligned.ok, '普通模式下原生视图仍与槽位对齐', normalAligned.detail);
+
+  // 用真实 Esc 回到全屏（Esc 的语义是「退出全屏」，这里先确认它在普通模式下无副作用）
   await api('panelAction', { action: 'press-escape' });
-  await sleep(700);
-  const restored = await api('debugLayout');
-  check(restored.slot.top === beforeFull.slot.top, '按 Esc 退出全屏并还原布局', `top=${restored.slot.top}`);
+  const afterEsc = await api('debugLayout');
+  check(afterEsc.slot.top === normal.slot.top, '普通模式下按 Esc 不改变布局', `top=${afterEsc.slot.top}`);
+
+  // 重新回到全屏并确认还原
+  await api('panelAction', { action: 'content-only', payload: { visible: true } });
+  const backToFull = await waitFor(async () => {
+    const layout = await api('debugLayout');
+    return layout.slot.top <= 40 ? { ok: true, value: layout } : { ok: false, value: layout };
+  }, { label: '回到全屏' }).then((r) => r.value);
+  check(backToFull.slot.top === fullscreenDefault.slot.top, '可再次进入全屏并还原布局', `top=${backToFull.slot.top}`);
+
 
   // Ctrl+滚轮缩放界面：视口 CSS 宽度应随缩放变小、内容变大
   // 先显式回到 100%，避免上一次运行留下的持久化缩放影响断言
