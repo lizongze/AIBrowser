@@ -832,14 +832,23 @@ async function openTarget(value, mode) {
   if (!text) return;
   setStatus(`打开中 ${shortPath(text, 30)}…`, 'busy');
   consumeActiveDraft();
+  const __t0 = performance.now();
+  state.openTiming = [];
+  const __mark = (label) => {
+    const ms = Math.round(performance.now() - __t0);
+    state.openTiming.push(`${label} ${ms}ms`);
+  };
   try {
     // 本地存在的路径优先（避免 README.md / package.json 被当成域名）
     const localStat = looksLikeUrl(text) ? await window.api.files.stat(text).catch(() => null) : null;
     const treatAsPath = !looksLikeUrl(text) || (localStat && localStat.exists);
     if (!treatAsPath) {
       const result = await window.api.sessions.open({ url: text });
+      __mark('sessions.open 返回（标签页可显示）');
       await refreshSessions();
+      __mark('refreshSessions 完成');
       await activateSession(result.sessionId);
+      __mark('activateSession 完成');
       setView('web');
       setStatus(`已打开 ${shortPath(text, 40)}`, 'ok');
       return;
@@ -1442,6 +1451,7 @@ window.__PVS_PANEL__ = () => {
     bodyBg: getComputedStyle(document.body).backgroundColor,
     openMode: state.openMode || 'web',
     uiScale: state.uiScale,
+    openTiming: state.openTiming || [],
     hotReload: state.hotReload,
     contentOnly: state.contentOnly,
     viewportWidth: window.innerWidth,

@@ -326,10 +326,19 @@ class PreviewSession {
       const normalized = cleanUrl(url) || url;
       this.file = null;
       this.rootId = null;
-      await this.webContents.loadURL(normalized);
+      // 不 await loadURL：它要等页面「完全加载」才 resolve，慢站点会卡好几秒，
+      // 而调用方（回车打开）需要立刻拿到会话并把页面显示出来。
+      // 加载进度由 did-start/did-stop-loading 事件驱动，界面会自然更新。
+      this.url = normalized;
+      this.title = normalized;
+      this.loading = true;
+      this.pendingLoad = this.webContents.loadURL(normalized).catch((err) => {
+        this.loading = false;
+        this.pushConsole({ level: 'error', text: `加载失败：${err.message}`, ts: Date.now() });
+        throw err;
+      });
+      this.pendingLoad.catch(() => {});
       this.startPolling();
-      this.url = this.webContents.getURL() || normalized;
-      this.title = this.webContents.getTitle() || normalized;
       this.emitChange();
       return this;
     }
@@ -344,8 +353,15 @@ class PreviewSession {
     this.file = path.resolve(target_file);
     this.rootId = registered.rootId;
     this.title = path.basename(this.file);
-    await this.webContents.loadURL(`${registered.url}?__pvsSession=${encodeURIComponent(this.id)}`);
-    this.url = this.webContents.getURL();
+    // 同样不 await：本地文件通常很快，但保持行为一致，避免任何加载卡住调用方
+    this.url = `${registered.url}?__pvsSession=${encodeURIComponent(this.id)}`;
+    this.loading = true;
+    this.pendingLoad = this.webContents.loadURL(this.url).catch((err) => {
+      this.loading = false;
+      this.pushConsole({ level: 'error', text: `加载失败：${err.message}`, ts: Date.now() });
+      throw err;
+    });
+    this.pendingLoad.catch(() => {});
     this.watchProjectDir(path.dirname(this.file));
     this.pollFiles(); // 建立 mtime 基线，避免首次轮询误判
     this.startPolling();
@@ -625,8 +641,13 @@ class PreviewSession {
     return this.webContents;
   }
 
-  async ensureLoaded() {
-    if (this.pendingLoad) await this.pendingLoad.catch(() => {});
+  /** 需要「内容已就绪」的能力（截图/取文本/eval）先等加载完成，但设置上限 */
+  async ensureLoaded(timeoutMs = 15000) {
+    if (!this.pendingLoad) return this;
+    await Promise.race([
+      this.pendingLoad.catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
     return this;
   }
 

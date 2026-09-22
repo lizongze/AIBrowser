@@ -48,8 +48,9 @@ async function runSmokeTest({ manager, files, server, app }) {
     return 1;
   }
 
-  // 3. 渲染结果
+  // 3. 渲染结果（open 现在是立即返回的，先等页面完成首轮加载）
   try {
+    await session.ensureLoaded(8000);
     const content = await session.getContent({});
     check(content.text.includes('AIBrowser Smoke'), '读取渲染后的文本', `${content.length} 字符`);
   } catch (err) {
