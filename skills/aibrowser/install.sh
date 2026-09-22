@@ -14,22 +14,24 @@ project_dir="$(cd "$skill_dir/../.." && pwd)"
 if [ $# -gt 0 ]; then
   targets=("$@")
 else
+  # DeepSeek Harness 的加载位置优先（project: .agents/skills / user: ~/.agents/skills）
   candidates=(
+    "$project_dir/.agents/skills"
+    "$HOME/.agents/skills"
+    "$HOME/.dsh/skills"
     "$HOME/.deepseek/skills"
     "$HOME/.codex/skills"
     "$HOME/.codefree-cli/skills"
     "$HOME/.claude/skills"
-    "$HOME/.config/deepseek/skills"
   )
   targets=()
   for c in "${candidates[@]}"; do
-    [ -d "$c" ] && targets+=("$c")
+    # 已存在的 skill 目录一律安装；另外始终创建项目级与用户级 .agents/skills
+    if [ -d "$c" ] && [ ! -L "$c" ]; then
+      targets+=("$c")
+    fi
   done
-  # 若一个都不存在，建一个默认位置
-  if [ ${#targets[@]} -eq 0 ]; then
-    mkdir -p "$HOME/.deepseek/skills"
-    targets=("$HOME/.deepseek/skills")
-  fi
+  targets+=("$project_dir/.agents/skills" "$HOME/.agents/skills")
 fi
 
 # 记录路径：符号链接安装时脚本无法靠「向上查找」反推项目目录

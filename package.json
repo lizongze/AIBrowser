@@ -18,7 +18,8 @@
     "smoke": "npm run build && electron . --smoke-test --headless",
     "verify": "npm run build && node scripts/verify.mjs",
     "panel:check": "electron scripts/panel-check.cjs",
-    "mcp": "node bin/aibrowser-mcp.js"
+    "mcp": "node bin/aibrowser-mcp.js",
+    "postinstall": "node scripts/install-skill.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

@@ -176,3 +176,18 @@ mkdir -p ~/.fonts && cp /mnt/c/Windows/Fonts/msyh.ttc /mnt/c/Windows/Fonts/simhe
 | 换字体有用吗 | 有用但不解决根本问题；中文栈已优先微软雅黑/苹方等高质量字体 |
 | 缩放 1.0 / 1.25 / 1.5 差异 | 渲染表面始终约 1525px，但报告的 DPR 从 1 变到 2.25 —— 说明呈现层在做缩放 |
 | WSLg 暴露的 X 屏 | 4976px 宽，窗口只占其中一块，最终呈现必然经过缩放 |
+
+## skill 的安装位置（DeepSeek Harness）
+
+DSH 从这些位置加载 skill（按优先级）：
+
+| 来源 | 路径 |
+| --- | --- |
+| project-dsh | `<项目根>/.dsh/skills` |
+| **project-agents** | `<项目根>/.agents/skills` |
+| user-dsh | `~/.dsh/skills` |
+| **user-agents** | `~/.agents/skills` |
+
+`npm install` 后由 `postinstall`（`scripts/install-skill.mjs`）自动把 `skills/aibrowser`
+以符号链接装到 `.agents/skills` 与 `~/.agents/skills`，因此新会话能直接发现；
+仓库内的 skill 改动会自动同步（符号链接）。手动重装：`node scripts/install-skill.mjs`。

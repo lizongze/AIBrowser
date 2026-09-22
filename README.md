@@ -48,7 +48,8 @@ npm start            # 启动面板（默认最大化）
 让其它 agent 能直接获得「打开网页/代码 → 取渲染结果 → 执行 JS → 截图 → 读报错」的能力。
 
 ```bash
-bash skills/aibrowser/install.sh          # 安装到本机 skill 目录（符号链接，仓库更新即同步）
+node scripts/install-skill.mjs            # 安装到 .agents/skills 与 ~/.agents/skills（npm install 后自动执行）
+bash skills/aibrowser/install.sh          # 或安装到本机所有已知 skill 目录
 bash skills/aibrowser/scripts/ensure-service.sh   # 确保后台服务就绪（幂等）
 ```
 
