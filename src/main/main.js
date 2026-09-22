@@ -373,7 +373,7 @@ function registerIpc() {
   });
   handle('ui:info', () => ({
     zoomFactor: state.window && !state.window.isDestroyed() ? state.window.webContents.getZoomFactor() : 1,
-    hotReload: state.manager ? state.manager.hotReload : false,
+    hotReload: state.manager ? state.manager.hotReload : true,
     contentOnly: config.read().contentOnly !== false,
     sidebar: config.read().sidebar === true,
     shortcut: {
@@ -495,7 +495,7 @@ async function bootstrap() {
   const configHotReload = flags['hot-reload'] === true ? true
     : flags['no-hot-reload'] === false ? false
       : flags['no-hot-reload'] === true ? false
-        : config.read().hotReload === true;
+        : config.read().hotReload !== false; // 默认开启，除非显式关闭过
   state.manager.setHotReload(configHotReload);
   config.write({ hotReload: configHotReload });
 

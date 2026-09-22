@@ -188,7 +188,21 @@ async function main() {
 
   // 热重载：默认关闭，开启后文件变化会自动刷新
   const hotDefault = await api('panelState');
-  check(hotDefault.state.hotReload === false, '热重载默认关闭', String(hotDefault.state.hotReload));
+  check(hotDefault.state.hotReload === true, '热重载默认开启', String(hotDefault.state.hotReload));
+  // 默认开启时改文件应当自动刷新
+  await api('openPath', { path: htmlFile });
+  await waitFor(async () => {
+    const s = await api('panelState');
+    return s.state.view === 'web' ? { ok: true } : { ok: false };
+  }, { label: '切到网页会话' });
+  const htmlOriginal = fs.readFileSync(htmlFile, 'utf8');
+  fs.writeFileSync(htmlFile, htmlOriginal.replace('<h1>', '<h1 data-default="1">默认热重载 '));
+  const autoReload = await waitFor(async () => {
+    const r = await api('eval', { expression: 'document.querySelector("h1").hasAttribute("data-default")' });
+    return r.value === 'true' ? { ok: true } : { ok: false };
+  }, { label: '默认热重载生效', timeoutMs: 8000 });
+  fs.writeFileSync(htmlFile, htmlOriginal);
+  check(autoReload.ok, '默认开启时改文件会自动刷新');
   const hotOn = await api('panelAction', { action: 'hot-reload', payload: { enabled: true } });
   check(hotOn.result.hotReload === true, '可开启热重载', JSON.stringify(hotOn.result));
   // 打开示例页并改文件，验证真的会刷新

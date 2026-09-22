@@ -10,7 +10,7 @@ const DEFAULTS = {
   theme: 'light',
   sidebar: false, // 默认隐藏左侧文件树（纯净预览）
   contentOnly: true, // 默认全屏预览：隐藏标题栏与工具栏，只留标签条
-  hotReload: false, // 热重载默认关闭（按需开启，避免持续轮询文件）
+  hotReload: true, // 默认开启：本地文件变化后自动刷新预览（--no-hot-reload 可关）
 };
 
 function configPath() {

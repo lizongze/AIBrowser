@@ -130,21 +130,21 @@ fc-cache -f ~/.fonts
 | --- | --- | --- | --- |
 | `contentOnly` | **true** | 全屏预览：隐藏标题栏与工具栏，只留标签条 → 内容区从顶部 32px 开始 | `--no-fullscreen` / `--fullscreen` |
 | `sidebar` | **false** | 不显示左侧文件树 | `--show-sidebar` |
-| `hotReload` | false | 热重载关闭 | `--hot-reload` / `--no-hot-reload` |
+| `hotReload` | **true** | 本地文件变化自动刷新预览 | `--no-hot-reload` / `--hot-reload` |
 | `uiScale` | 1 | 界面缩放 100% | `Ctrl+滚轮` |
 
 全屏模式下按 `Esc` 或 `Ctrl+Shift+M` 可临时退出查看完整界面（退出状态会持久化）。
 
 ## 热重载
 
-默认**关闭**（不做任何文件轮询）。三种开启方式：
+默认**开启**。三种控制方式：
 
 ```bash
 electron . --hot-reload          # 启动时开启（与配置一起生效，参数优先）
 # 或点标题栏 ⟳ / 按 Ctrl+Shift+H / 菜单「热重载」
 ```
 
-状态持久化在运行时目录的 `config.json`（`hotReload`）。关闭状态可用 `--no-hot-reload` 强制覆盖。
+状态持久化在运行时目录的 `config.json`（`hotReload`）。可用 `--no-hot-reload` 关闭，或 `--hot-reload` 强制开启。
 开启后每 0.6s 轮询被预览文件所在目录中的 `html/css/js/json/svg/md`，变化即自动刷新页面。
 
 ## WSL / 容器兼容

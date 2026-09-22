@@ -72,7 +72,7 @@ const state = {
   sidebar: false, // 默认隐藏左侧文件树，专注预览内容
   contentOnly: true, // 全屏预览：隐藏标题栏与工具栏，只留标签条（默认开启）
   uiScale: 1, // 面板界面缩放（Ctrl+滚轮 / Ctrl+Shift+= / Ctrl+0）
-  hotReload: false, // 热重载默认关闭，按需开启
+  hotReload: true, // 默认开启（与主进程配置一致）
   consoleTab: 'console',
   consoleFilterSession: null,
   networkEnabled: false,
