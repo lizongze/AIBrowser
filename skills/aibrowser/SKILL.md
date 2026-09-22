@@ -64,6 +64,10 @@ $P eval "[...document.querySelectorAll('.item')].map(e => e.innerText.trim())"
 $P shot --out /tmp/page.png --full-page --json
 $P shot --selector ".card" --out /tmp/card.png --json
 
+# 目录清单（AI 也能用；默认忽略 node_modules/.git 等，--all 可列全）
+$P tree ./src --json
+$P tree . --all --json
+
 # 排错
 $P debugWatch --json             # 热重载当前盯着哪些文件（tab 里的文件 + 页面引用的资源）
 $P console --json

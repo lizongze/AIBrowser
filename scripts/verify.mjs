@@ -218,6 +218,24 @@ async function main() {
   check(treeEditor.editor.docChars > 100, '点击文件树后编辑器装载了内容', `${treeEditor.editor.docChars} 字符 / ${treeEditor.editor.docLines} 行`);
   check(treeEditor.editor.renderedLines > 5, '点击文件树后内容真的渲染出来', `${treeEditor.editor.renderedLines} 行`);
 
+  // 文件树默认忽略依赖/版本库目录（node_modules 的各种变体也在内）
+  const treeEntries = (await api('tree', { dir: root })).entries.map((e) => e.name);
+  check(
+    !treeEntries.some((name) => /^node_modules/i.test(name) || name === '.git' || name === '.aibrowser'),
+    '文件树默认忽略 node_modules 与 .git',
+    treeEntries.slice(0, 8).join(' ') + ' …',
+  );
+  const treeAll = (await api('tree', { dir: root, includeIgnored: true })).entries.map((e) => e.name);
+  check(treeAll.some((name) => /^node_modules/i.test(name)), '需要时可以列出被忽略的目录', `--all 共 ${treeAll.length} 项`);
+
+  // 点击文件树里的文件：高亮必须在点击的瞬间就落在那一行（不等文件装载完）
+  const clickReadme = await api('panelAction', { action: 'open-tree', payload: { name: 'README.md' } });
+  check(
+    clickReadme.result?.activePath === clickReadme.result?.path && String(clickReadme.result?.path).endsWith('README.md'),
+    '点击文件树后立刻高亮在点击的那一行',
+    `activePath=${path.basename(clickReadme.result?.activePath || '')}`,
+  );
+
   // 文件树的根目录必须稳定：展开子目录、点开里面的文件、或子目录被注册成根目录，
   // 都不该让树「跑到子目录里去」（父级消失、回不去 —— 曾经的 bug）
   const examplesDir = path.join(root, 'examples');

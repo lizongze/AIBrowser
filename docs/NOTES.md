@@ -152,6 +152,20 @@ Electron 对自定义 `pvs://` 协议不产生 resource timing 条目，只能�
 资源类型白名单见 `src/main/watch-scope.js`（前端 / 样式 / 模板 / 后端 / 数据接口 / 测试 / 配置 / 文档 / 资源，共 9 类 160 种后缀）。
 查看当前范围：`pvs debugWatch`（HTTP 同名的 `debugWatch` 动作）。
 
+## 文件树点击高亮的「慢半拍」
+
+现象：点文件树里的文件，高亮要等一会儿才出现，连点几个文件时高亮还停在别的行上。
+
+原因：点击处理里先 `await renderTree()` 再 `await openTarget()`，而高亮条件读的是
+`state.activeFile` —— 那个字段要等 `files.read` + CodeMirror 装载完成后才写。于是「渲染时读到的
+还是旧值、写完时又没人重渲染」，表现就是延迟 + 错行；另外 `buildTree()` 逐个子目录串行 `await`，
+展开层级多时重渲染本身也慢。
+
+修法：新增独立选中状态 `state.treeSelected`，点击**同步**设好并就地切换 `.active` class
+（`setTreeSelected`，不重渲染整棵树）；装载完成后 `renderCode` 再把它对齐到真实装载的文件，
+`activateSession` 也跟着当前标签的文件走。`buildTree()` 改成子目录并发读取
+（`Promise.all` + 按位置 splice），`files.tree()` 里的 stat 也改成并发。
+
 ## 文件树「展开子目录点一下就回不去」
 
 现象：在文件树里展开子目录、点开里面的文件后，父级目录消失，树只剩那个子目录。

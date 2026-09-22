@@ -568,7 +568,7 @@ class ControlServer {
       case 'tree': {
         const dir = params.dir || this.files.listRoots()[0]?.dir;
         if (!dir) throw new Error('没有已打开的项目目录');
-        return { dir, entries: await this.files.tree(dir) };
+        return { dir, entries: await this.files.tree(dir, { includeIgnored: Boolean(params.includeIgnored) }) };
       }
 
       case 'ui': {

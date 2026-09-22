@@ -95,6 +95,12 @@
   打开文件时主进程会把该文件所在目录也注册成根目录（授权需要），但**树不会跟着跑到子目录里** ——
   多根目录时侧栏顶部会出现根目录切换栏（`#root-bar`），点一下就切；否则展开子目录点个文件就「父级消失、回不去」。
   `panelState.treeRoot` / `treeRows` 暴露当前树根与行数，`panelAction set-tree-root` 可在验收里切换。
+- 文件树默认忽略 `node_modules`（含 `node_modules.*` 变体）、`.git`/`.hg`/`.svn`、`.aibrowser`、`dist`/`build`/`.next` 等
+  依赖、版本库与构建目录（`IGNORED_DIRS` + `IGNORED_DIR_PATTERNS`，见 `src/main/file-service.js`）；
+  `tree` 动作传 `includeIgnored:true`（CLI `pvs tree --all`）可列出全部。
+- 文件树高亮用的是**独立的选中状态**（`state.treeSelected`），点击时同步设好并就地改 class，
+  不等 `files.read` + 编辑器装载（那会让高亮慢半拍、连点几个文件时还停在旧行）；
+  `panelState.treeSelected` / `treeActivePath` 便于验收。
 - 代码视图支持：语法高亮、行号、折叠、搜索（`Ctrl+F`）、自动换行；默认即可编辑，`Ctrl+S` 保存（走 `api.save`）。
 - 代码区顶部（`.code-head`）固定顺序：`#code-name`（文件名）→ `#code-lang`（语言类型）→ `#code-path`（文件地址）→ 保存状态。
   地址取「最外层根目录」下的相对路径（保留目录层级；根目录下的文件与根目录外的文件直接显示绝对路径），

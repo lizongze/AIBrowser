@@ -53,7 +53,7 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 | `network` | `enabled`、`clear` | `{enabled,entries:[{method,url,status,resourceType,ok,durationMs}]}` |
 | `read` | `file`、`maxLength` | `{path,size,text,language,binary}` |
 | `save` | `file`、`content` | `{file,bytes}` |
-| `tree` | `dir` | `{dir,entries:[{name,path,dir,size}]}` |
+| `tree` | `dir`、`includeIgnored`（默认忽略 node_modules/.git 等） | `{dir,entries:[{name,path,dir,size,isPreview,hidden}]}` |
 | `roots` | `root` | `{roots:[{id,dir}]}` |
 | `ui` | `view:'code'\|'web'\|'console'` | `{view}`（有面板时切视图） |
 | `batch` | `items`、`outDir`、`fullPage`、`timeout`、`format` | `{total,succeeded,failed,items:[{index,target,name,ok,image,images,width,height,bytes,source,sessionId}]}`；串行逐项切成活动标签，`source=panel` 表示该项截的是整块面板 |

@@ -66,6 +66,9 @@ const state = {
   // 文件树当前展示哪个根目录。必须显式记住：打开文件时主进程会把文件所在目录也注册成
   // 根目录，如果跟着「最后新增的根目录」走，展开子目录点一下文件，父级目录就没了。
   treeRootDir: null,
+  // 「点在文件树里的那个文件」：点击的瞬间就设好，用于立即高亮。
+  // 不能复用 activeFile —— 它是「编辑器真的装载完了」的标记，等它亮起来会有明显延迟。
+  treeSelected: null,
   sessions: [],
   activeId: null,
   drafts: [], // 新建但还没绑定文件的空标签：{ id, active }
@@ -401,6 +404,7 @@ async function renderCode(session) {
 
   if (needLoad) {
     state.activeFile = file;
+    state.treeSelected = file;
     el.codeName.textContent = basename(file);
     el.codePath.title = file;
     fitPath(el.codePath, displayPath(file));
@@ -745,6 +749,7 @@ async function activateSession(id, { force = false } = {}) {
   consumeActiveDraft(); // 打开真实会话后，聚焦中的空标签让位（其它空标签保留）
   el.address.value = session.file || session.url || '';
   setOpenMode(isCode ? 'code' : 'web');
+  if (session.file) setTreeSelected(session.file); // 树高亮跟着当前标签走
   window.api.sessions.focus(id).catch(() => {});
   setView(targetView);
   renderTabs();
@@ -860,6 +865,7 @@ async function renderTree() {
 async function buildTree(dir, depth, filter) {
   const entries = state.treeCache.get(dir) || (await loadTree(dir));
   const rows = [];
+  const pending = [];
   for (const entry of entries) {
     if (filter && !entry.name.toLowerCase().includes(filter)) {
       if (!entry.dir) continue;
@@ -867,7 +873,7 @@ async function buildTree(dir, depth, filter) {
     const row = document.createElement('div');
     row.className = 'node';
     const isOpen = state.expanded.has(entry.path) || Boolean(filter);
-    const isActive = state.activeFile === entry.path;
+    const isActive = (state.treeSelected || state.activeFile) === entry.path;
     row.classList.toggle('dir', entry.dir);
     row.classList.toggle('file', !entry.dir);
     row.classList.toggle('active', isActive);
@@ -876,12 +882,17 @@ async function buildTree(dir, depth, filter) {
     row.innerHTML = `<span class="node-icon">${icon}</span><span class="node-name">${escapeHtml(entry.name)}</span>
       ${entry.dir ? '' : `<span class="node-meta">${humanSize(entry.size)}</span>`}`;
     row.title = entry.path;
+    row.dataset.path = entry.path; // 供「只改高亮、不重渲染整棵树」用
     row.addEventListener('click', () => onTreeClick(entry));
     rows.push(row);
     if (entry.dir && isOpen) {
-      const children = await buildTree(entry.path, depth + 1, filter);
-      rows.push(...children);
+      // 记下插入位置，先把所有展开的子目录并发读完，再按位置插进来
+      pending.push({ at: rows.length, promise: buildTree(entry.path, depth + 1, filter) });
     }
+  }
+  if (pending.length) {
+    const lists = await Promise.all(pending.map((item) => item.promise));
+    for (let i = pending.length - 1; i >= 0; i -= 1) rows.splice(pending[i].at, 0, ...lists[i]);
   }
   return rows;
 }
@@ -893,11 +904,22 @@ async function onTreeClick(entry) {
     await renderTree();
     return;
   }
+  // 先高亮再打开：读取文件 + 装载编辑器都是异步的，等高亮会明显「慢半拍」，
+  // 连点几个文件时高亮还会停在别的行上。
+  setTreeSelected(entry.path);
   // 注意：这里不要提前写 state.activeFile —— 那是「编辑器当前装载的文件」的标记，
   // 提前改掉会让 renderCode 误判为已装载，从而跳过读取，编辑器就一直是空的。
-  await renderTree();
   // 由文件类型决定预览方式：HTML/SVG 走网页，其余走代码
   await openTarget(entry.path, entry.isPreview ? 'web' : 'code');
+}
+
+/** 文件树高亮：记状态 + 就地改 class（不重渲染整棵树，点击零延迟） */
+function setTreeSelected(file) {
+  state.treeSelected = file || null;
+  const current = state.treeSelected || state.activeFile || null;
+  for (const row of document.querySelectorAll('#tree .node')) {
+    row.classList.toggle('active', Boolean(row.dataset.path) && row.dataset.path === current);
+  }
 }
 
 /** 打开方式：网页 / 代码。仍保留状态是为了「新标签页默认方式」与状态栏提示 */
@@ -1478,7 +1500,12 @@ window.__PVS_ACTION__ = (action, payload = {}) => {
         : nodes.find((node) => node.classList.contains('file'));
       if (!target) return { error: 'not found', available: nodes.map((n) => n.textContent.trim()).slice(0, 20) };
       target.click();
-      return { clicked: target.textContent.trim() };
+      // 点击处理函数在第一个 await 之前就设好了高亮，这里同步读 DOM 即可证明「点哪亮哪」
+      return {
+        clicked: target.textContent.trim(),
+        path: target.dataset.path || null,
+        activePath: document.querySelector('#tree .node.active')?.dataset?.path || null,
+      };
     }
     case 'edit-doc': {
       // 模拟用户键入：把内容替换成 payload.text（用于验证可编辑与保存链路）
@@ -1631,6 +1658,9 @@ window.__PVS_PANEL__ = () => {
     roots: state.roots,
     treeRoot: treeRoot()?.dir || null,
     treeRows: document.querySelectorAll('#tree .node').length,
+    treeSelected: state.treeSelected,
+    // 直接从 DOM 读当前高亮行：能证明「点击的瞬间就亮了」，而不是等文件装载完
+    treeActivePath: document.querySelector('#tree .node.active')?.dataset?.path || null,
     codeSessions: [...state.codeSessions.entries()].map(([id, meta]) => ({ id, file: meta.file, chars: meta.text ? meta.text.length : 0 })),
     logs: state.logs.slice(-8).map((entry) => `${entry.level}: ${entry.text.slice(0, 120)}`),
     viewTrace: (state.viewTrace || []).slice(-12),

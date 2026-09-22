@@ -40,7 +40,19 @@ function normalizePath(input) {
 }
 
 const MAX_READ_BYTES = 4 * 1024 * 1024; // 代码预览上限
-const IGNORED_DIRS = new Set(['.git', 'node_modules', '.cache', 'dist', '.next', '__pycache__', '.venv', 'venv', '.idea']);
+// 文件树默认不显示的目录：依赖、版本库元数据、构建产物、缓存
+const IGNORED_DIRS = new Set([
+  '.git', '.hg', '.svn', '.cache', '.aibrowser',
+  'node_modules', 'dist', 'build', '.next', '.nuxt', '.output', 'coverage',
+  '__pycache__', '.venv', 'venv', 'target', '.idea',
+]);
+// 带后缀/前缀的变体（node_modules.win2、.git-rewrite…）也要挡住
+const IGNORED_DIR_PATTERNS = [/^node_modules[.\-_].*/i, /^\.git[.\-_].*/i, /^dist[.\-_].*/i, /^build[.\-_].*/i];
+
+function isIgnoredDir(name) {
+  if (IGNORED_DIRS.has(name)) return true;
+  return IGNORED_DIR_PATTERNS.some((pattern) => pattern.test(name));
+}
 
 class FileService {
   constructor() {
@@ -117,24 +129,24 @@ class FileService {
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       const hidden = entry.name.startsWith('.');
-      if (entry.isDirectory() && !includeIgnored && IGNORED_DIRS.has(entry.name)) continue;
-      let size = 0;
-      if (entry.isFile()) {
-        try {
-          size = (await fs.stat(full)).size;
-        } catch {
-          size = 0;
-        }
-      }
+      if (entry.isDirectory() && !includeIgnored && isIgnoredDir(entry.name)) continue;
       out.push({
         name: entry.name,
         path: full,
         dir: entry.isDirectory(),
-        size,
+        size: 0,
         hidden,
         isPreview: entry.isFile() && isWebPreviewable(full),
       });
     }
+    // 文件大小并发取：WSL 的 /mnt（9p）上单次 stat 约 1ms，串行会让大目录明显变慢
+    await Promise.all(out.filter((item) => !item.dir).map(async (item) => {
+      try {
+        item.size = (await fs.stat(item.path)).size;
+      } catch {
+        item.size = 0;
+      }
+    }));
     out.sort((a, b) => {
       if (a.dir !== b.dir) return a.dir ? -1 : 1;
       return a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true });

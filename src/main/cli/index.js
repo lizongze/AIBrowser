@@ -188,6 +188,19 @@ async function commandShot(args, flags) {
   return EXIT_OK;
 }
 
+async function commandTree(args, flags) {
+  const { state } = await ensureTarget(targetOptions(flags));
+  const result = await send('tree', {
+    dir: args[0] || flags.dir,
+    includeIgnored: Boolean(flags.all),
+  }, { state });
+  if (flags.json) jsonOut({ ok: true, ...result });
+  else {
+    for (const entry of result.entries) out(`${entry.dir ? '▸' : '·'} ${entry.name}${entry.dir ? '/' : ''}`);
+  }
+  return EXIT_OK;
+}
+
 async function commandDebugWatch(_args, flags) {
   const { state } = await ensureTarget(targetOptions(flags));
   const result = await send('debugWatch', { sessionId: flags.session }, { state });
@@ -423,6 +436,7 @@ const COMMANDS = {
   text: commandContent,
   eval: commandEval,
   console: commandConsole,
+  tree: commandTree,
   debugWatch: commandDebugWatch,
   watch: commandDebugWatch,
   logs: commandConsole,
