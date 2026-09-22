@@ -23,9 +23,24 @@ WSL 里的面板窗口要经 **WSLg 的远程呈现层**送到屏幕：应用只
 
 ### 怎么在 Windows 原生跑
 
+**推荐用 `run-native.cmd`**（而不是直接双击 `start-windows.cmd`）：
+
 ```text
-双击 start-windows.cmd
+双击 run-native.cmd
 ```
+
+两者的区别很重要：
+
+| 启动方式 | 环境 | 结果 |
+| --- | --- | --- |
+| `start-windows.cmd` | 从 WSL 调用时会把 Linux 变量带给 Windows 进程 | **Ctrl+V 粘贴失效**等问题 |
+| `run-native.cmd` | 走 `scripts/run-native.ps1`，剔除 WSL 变量后启动 | 剪贴板等 Windows 集成正常 |
+
+被剔除的变量：`WSL_DISTRO_NAME`、`WSL_INTEROP`、`WSLENV`、`DISPLAY`、`WAYLAND_DISPLAY`、
+`PULSE_SERVER`、`XDG_RUNTIME_DIR`、`LD_LIBRARY_PATH`、`TERM`、`SHELL`、`LANG`、`HOME` 等。
+
+> 从 WSL 手动启动时，**不要**用 `cmd.exe /c start-windows.cmd`，那样等于第一种方式；
+> 要用 `powershell.exe -File scripts\run-native.ps1 -NoWait`（或先自行清理上述变量）。
 
 脚本会：
 1. 在 `node_modules.win\` 里装一份 **Windows 版依赖**（约 150MB，需联网）——WSL 与 Windows
