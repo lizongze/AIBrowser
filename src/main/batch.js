@@ -162,9 +162,8 @@ async function runBatch(opts) {
   for (let i = 0; i < items.length; i += 1) {
     const index = i + 1;
     const raw = items[i];
-    const item = typeof raw === 'string'
-      ? (/^https?:\/\//i.test(raw) ? { url: raw } : { file: raw })
-      : { ...raw };
+    // 字符串项不预判类型：统一交给 openSmart 判断（避免把域名当成路径）
+    const item = typeof raw === 'string' ? { target: raw } : { ...raw };
     const target = item.url || item.file || String(raw);
 
     if (item.skip) {
@@ -185,7 +184,6 @@ async function runBatch(opts) {
     let consoleBefore = 0;
     try {
       // 本地文件：缺省用其父目录作为授权根目录
-      if (item.file) item.file = normalizePath(item.file);
       if (item.file && !item.root) {
         const absFile = path.resolve(item.file);
         if (!fs.existsSync(absFile)) throw new Error(`路径不存在：${item.file}`);
@@ -195,16 +193,17 @@ async function runBatch(opts) {
 
       session = item.sessionId ? manager.get(item.sessionId) : null;
       if (!session) {
-        if (item.url) {
-          // URL 走 open（openPath 只接受本地路径）
-          session = await manager.open({ url: item.url });
-        } else {
-          const opened = await manager.openPath(item.file);
-          session = opened.kind === 'code' ? null : opened.session;
-        }
-        if (!session) throw new Error('该目标不是可渲染的网页（代码文件无法截图）');
+        // 统一入口：字符串/ url / file 都在这里判断，不再由调用方区分
+        const target = item.target !== undefined ? item.target : (item.url || item.file);
+        const opened = await manager.openSmart({
+          target,
+          force: item.force,
+          root: item.root,
+        });
+        if (opened.kind === 'code') throw new Error('该目标按代码预览处理，无法网页截图（可加 force:"web"）');
+        session = opened.session;
       } else {
-        await session.load(item.url ? { url: item.url } : { file: item.file });
+        await session.load(item.target ? { url: item.target } : item.url ? { url: item.url } : { file: item.file });
       }
 
       // 视口：仅对「非整页」截图的宽度有意义；整页截图会自动扩展到全页高度

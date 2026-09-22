@@ -98,42 +98,38 @@ function errorMessage(err) {
 // ---------- 命令实现 ----------
 
 async function commandOpen(args, flags) {
-  const target = resolveTargetArg(args[0]);
-  if (target.kind === 'none') throw Object.assign(new Error('用法：pvs open <file|url>'), { code: 'EUSAGE' });
+  const raw = args[0];
+  if (!raw) throw Object.assign(new Error('用法：pvs open <file|url|target>'), { code: 'EUSAGE' });
   const { state, spawned } = await ensureTarget(targetOptions(flags));
-  const params = {};
-  if (target.kind === 'url') params.url = target.url;
-  else {
-    if (!target.exists) throw new Error(`路径不存在：${target.file}`);
-    params.file = target.file;
-    if (flags.root) params.root = path.resolve(String(flags.root));
-  }
-  // URL 走 open 动作；本地路径走 openPath（目录会找 index.html）或 openCode
-  const action = target.kind === 'url' ? 'open' : flags.mode === 'code' ? 'openCode' : 'openPath';
-  const result = await send(action, params, { state, timeoutMs: 30000 });
+  // 原样透传：类型判断与路径补全都在服务端做（manager.openSmart），
+  // 这里任何「补全或猜测」都会把 URL 拼成本地路径、或把 Windows 路径拼坏。
+  const target = String(raw);
+  const result = await send('open', {
+    target,
+    force: flags.mode === 'code' ? 'code' : undefined,
+    root: flags.root ? path.resolve(String(flags.root)) : undefined,
+  }, { state, timeoutMs: 30000 });
   if (flags.json) {
     jsonOut({ ok: true, spawned, ...result });
   } else {
     out(`已打开 [${result.sessionId}] ${result.kind === 'code' ? '代码' : '网页'} · ${result.title || ''}`);
-    out(`  URL: ${result.url || result.file}`);
+    out(`  ${result.url || result.file}`);
     if (spawned) out('  （已自动启动后台预览服务）');
   }
   return EXIT_OK;
 }
 
 async function commandCode(args, flags) {
-  const target = resolveTargetArg(args[0]);
-  if (target.kind !== 'path') throw Object.assign(new Error('用法：pvs code <file>'), { code: 'EUSAGE' });
-  if (!target.exists) throw new Error(`文件不存在：${target.file}`);
+  const raw = args[0];
+  if (!raw) throw Object.assign(new Error('用法：pvs code <file>'), { code: 'EUSAGE' });
   const { state, spawned } = await ensureTarget(targetOptions(flags));
-  const result = await send('openCode', {
-    file: target.file,
-    line: flags.line ? Number(flags.line) : undefined,
-    column: flags.column ? Number(flags.column) : undefined,
+  const result = await send('open', {
+    target: String(raw),
+    force: 'code',
     root: flags.root ? path.resolve(String(flags.root)) : undefined,
   }, { state });
   if (flags.json) jsonOut({ ok: true, spawned, ...result });
-  else out(`代码会话 [${result.sessionId}] ${result.file} (${result.language})`);
+  else out(`代码会话 [${result.sessionId}] ${result.file} (${result.language || result.kind})`);
   return EXIT_OK;
 }
 

@@ -34,7 +34,7 @@ const log = (message) => process.stderr.write(`[aibrowser-mcp] ${message}\n`);
 
 const ITEM_SCHEMA = {
   anyOf: [
-    { type: 'string', description: '要打开的 URL 或本地文件路径' },
+    { type: 'string', description: '要打开的 URL 或本地文件路径（无需区分类型）' },
     {
       type: 'object',
       properties: {
@@ -65,14 +65,15 @@ const ITEM_SCHEMA = {
 const TOOLS = [
   {
     name: 'browser_open',
-    description: '打开一个网页或本地文件（Chromium 渲染），返回会话 id 与页面标题。',
+    description: '打开网页或本地文件（真实 Chromium 渲染），返回会话 id、类型与标题。直接传 target 即可，不需要判断它是文件还是 URL；HTML/SVG 走网页预览，其它文件走代码预览。',
     inputSchema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: '网页地址' },
-        file: { type: 'string', description: '本地文件路径' },
-        root: { type: 'string', description: '授权根目录（本地文件的相对资源需要）' },
+        target: { type: 'string', description: '要打开的目标：网页地址、本地文件路径或目录（Windows 路径如 D:\\dir\\a.html 也支持）' },
+        root: { type: 'string', description: '授权根目录（可选；本地文件的相对资源需要）' },
+        force: { type: 'string', enum: ['web', 'code'], description: '强制预览方式，一般不用传' },
       },
+      required: ['target'],
     },
   },
   {
@@ -209,7 +210,14 @@ function textResult(value) {
 async function handleTool(name, args) {
   switch (name) {
     case 'browser_open': {
-      const result = await call('open', { url: args.url, file: args.file, root: args.root });
+      // 统一入口：target 是什么就打开什么；file/url 仍兼容旧调用
+      const result = await call('open', {
+        target: args.target,
+        url: args.target === undefined ? args.url : undefined,
+        file: args.target === undefined ? args.file : undefined,
+        root: args.root,
+        force: args.force,
+      });
       return textResult(result);
     }
     case 'browser_batch': {

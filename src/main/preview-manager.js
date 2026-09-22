@@ -290,6 +290,52 @@ class PreviewManager {
 
   // ---------- 便捷入口 ----------
 
+  /**
+   * 统一打开入口：**不要求调用方区分「文件还是 URL」**。
+   * 判断逻辑只在这里做一次：
+   *   1) 本地已存在的路径（含目录 → 找 index.html）优先按文件处理，能避免
+   *      `README.md` / `package.json` 这类含点号的相对路径被误判成域名；
+   *   2) 带 scheme（http/https/file/data/about）或长得像域名 → 按 URL 处理；
+   *   3) 其余按路径处理，交给上层报「不存在」。
+   * HTML/SVG 走网页预览，其它文件走代码预览（除非 force='web'）。
+   * @param {{target?:string, force?:'code'|'web', root?:string, focus?:boolean}} opts
+   */
+  async openSmart({ target, force, root, focus = true } = {}) {
+    const raw = String(target || '').trim();
+    if (!raw) throw new Error('需要 target（文件路径或 URL）');
+    if (root) this.files.addRoot(root);
+
+    const looksLikeUrlText = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || /^about:/i.test(raw);
+    const candidate = normalizePath(raw);
+    const abs = path.isAbsolute(candidate) ? candidate : path.resolve(candidate);
+    const exists = fs.existsSync(abs);
+
+    if (exists) {
+      // 目录 → 其 index.html
+      let file = abs;
+      if (fs.statSync(abs).isDirectory()) {
+        const index = path.join(abs, 'index.html');
+        if (!fs.existsSync(index)) throw new Error(`目录下没有 index.html：${abs}`);
+        file = index;
+      }
+      const wantWeb = force === 'web' || (force !== 'code' && isWebPreviewable(file));
+      const session = wantWeb
+        ? await this.open({ file, focus })
+        : await this.openCode({ file, focus });
+      return { kind: wantWeb ? 'web' : 'code', session, language: session.language || null };
+    }
+
+    // 不像 URL 又不存在 → 明确报路径错误（比当成域名去请求更有诊断价值）
+    const looksLikeDomain = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/|$)/i.test(raw);
+    if (!looksLikeUrlText && !looksLikeDomain) {
+      throw new Error(`路径不存在：${abs}`);
+    }
+
+    const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || /^about:/i.test(raw) ? raw : `https://${raw}`;
+    const session = await this.open({ url, focus });
+    return { kind: 'web', session };
+  }
+
   /** 智能打开：目录→index.html；.html→网页预览；其它→代码预览 */
   async openPath(targetPath, opts = {}) {
     const abs = path.resolve(targetPath);

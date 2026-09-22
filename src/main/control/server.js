@@ -364,6 +364,25 @@ class ControlServer {
         return { pong: true, pid: process.pid, mode: this.mode, version: VERSION, chrome: process.versions.chrome, port: this.port };
 
       case 'open': {
+        // target 是统一入口：调用方不必区分文件还是 URL；file/url 仍兼容
+        if (params.target !== undefined && params.file === undefined && params.url === undefined) {
+          const { kind, session } = await manager.openSmart({
+            target: params.target,
+            force: params.force === 'code' ? 'code' : params.force === 'web' ? 'web' : undefined,
+            root: params.root,
+            focus: params.focus !== false,
+          });
+          if (session.file) session.watchProjectDir(path.dirname(session.file));
+          return {
+            sessionId: session.id,
+            kind,
+            url: session.info().url,
+            title: session.title,
+            file: session.file,
+            language: session.language || null,
+            target: params.target,
+          };
+        }
         const session = await manager.open({
           file: params.file,
           url: params.url,

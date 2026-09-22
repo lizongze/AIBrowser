@@ -35,9 +35,10 @@ bash scripts/ensure-service.sh      # 确保后台服务已就绪（幂等，见
 ```bash
 P=scripts/pvs.sh          # 本 skill 的包装脚本，等价于 pvs
 
-# 打开（--root 授权项目目录，本地文件的相对资源才能加载）
+# 打开：直接把目标交给工具，不需要自己判断是文件还是 URL
 $P open ./index.html --root . --json
 $P open https://example.com/ --json
+$P open 'D:\dir\page.html' --json          # Windows 路径也可以
 
 # 取渲染后的内容
 $P content --selector "#main" --json          # 该元素的可见文本
@@ -109,6 +110,7 @@ $P batch --dir ./site --ext html                   # 收集目录下的 HTML
 ## 必须遵守的三条
 
 1. **本地文件先授权目录**：`--root <dir>`（或先用面板打开该目录）。否则报 `ENOTALLOWED`。
+   类型判断交给工具：`open` 直接接受文件路径、目录或 URL —— **不要**先探测路径是否存在再决定调哪个命令。
 2. **异步渲染要轮询等待**，`open` 之后不要立刻取内容：
 
    ```bash
