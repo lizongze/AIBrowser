@@ -1,0 +1,13 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 32px; background: #0d1117; color: #d7dde5;
+  font: 14px/1.6 system-ui, -apple-system, "Noto Sans SC", sans-serif; }
+.hero h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: .02em; }
+.hero p { margin: 0 0 16px; color: #8b949e; }
+#btn { padding: 8px 16px; border-radius: 8px; border: 1px solid #4c8dff;
+  background: #4c8dff; color: #fff; font-size: 14px; cursor: pointer; }
+#btn:hover { filter: brightness(1.1); }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 28px; }
+.card { padding: 16px; border: 1px solid #232a34; border-radius: 10px; background: #151a21; }
+.card h2 { margin: 0 0 6px; font-size: 15px; color: #a371f7; }
+.card p { margin: 0; color: #8b949e; }

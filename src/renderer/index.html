@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" />
+  <title>Preview Studio</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-theme="light" data-view="web">
+  <div id="titlebar">
+    <div class="tb-left">
+      <button class="icon-btn" id="btn-sidebar" title="显示/隐藏文件树 (Ctrl+B)">▥</button>
+      <span class="logo">◧</span><span class="app-name">Preview Studio</span>
+      <button class="chip" id="root-chip" title="切换根目录"><span class="chip-dot"></span><span id="root-label">未打开文件夹</span></button>
+    </div>
+    <div class="tb-right">
+      <span class="status" id="status-text">就绪</span><span class="dot" id="status-dot"></span>
+      <button class="icon-btn" id="btn-open-folder" title="打开文件夹 (Ctrl+O)">📂</button>
+      <button class="icon-btn" id="btn-console" title="控制台 (Ctrl+J)">⌨</button>
+      <button class="icon-btn" id="btn-fullscreen" title="全屏预览：只留标签页 (Ctrl+Shift+M)">⛶</button>
+      <button class="icon-btn" id="btn-theme" title="切换主题">◐</button>
+    </div>
+  </div>
+
+  <div id="body">
+    <aside id="sidebar" style="display:none">
+      <div class="side-head">
+        <div class="side-tabs" id="side-tabs">
+          <button class="side-tab" data-side="files">文件</button>
+          <button class="side-tab" data-side="sessions">会话</button>
+        </div>
+        <div class="side-tools">
+          <input id="tree-filter" class="input" placeholder="筛选…" />
+          <button class="icon-btn" id="btn-refresh-tree" title="刷新">⟳</button>
+        </div>
+      </div>
+      <div class="side-body" id="side-files"><div class="tree" id="tree"></div></div>
+      <div class="side-body" id="side-sessions" hidden><div class="sess-list" id="sess-list"></div></div>
+      <div class="side-foot" id="side-foot">0 个会话 · 0 个根目录</div>
+    </aside>
+
+    <div id="divider" title="拖拽调整宽度" style="display:none"></div>
+
+    <main id="main">
+      <div id="tabs" class="tabs"></div>
+
+      <div id="toolbar">
+        <button class="icon-btn" id="nav-back" title="后退">←</button>
+        <button class="icon-btn" id="nav-forward" title="前进">→</button>
+        <button class="icon-btn" id="nav-reload" title="刷新">⟳</button>
+        <input id="address" class="input address" placeholder="输入 URL 或文件路径，回车打开" />
+      </div>
+
+      <div id="content">
+        <div id="web-slot" class="web-slot">
+          <div class="web-empty" id="web-empty">
+            <div class="empty-title">没有打开的标签</div>
+            <div class="empty-sub">点标签条末尾的 <kbd>＋</kbd> 新建标签，或在上方地址栏输入 URL / 文件路径，也可以从左侧文件树点文件打开</div>
+          </div>
+        </div>
+
+        <div id="code-pane" class="code-pane">
+          <div class="code-head">
+            <span class="file-name" id="code-name">—</span>
+            <span class="badge" id="code-lang">plain</span>
+            <span class="spacer"></span>
+            <button class="chip" id="code-save" hidden>保存 (Ctrl+S)</button>
+          </div>
+          <div id="editor"></div>
+        </div>
+
+        <div id="console-pane" class="console-pane" hidden>
+          <div class="console-head">
+            <div class="side-tabs" id="console-tabs">
+              <button class="side-tab" data-ctab="console">控制台</button>
+              <button class="side-tab" data-ctab="network">网络</button>
+            </div>
+            <span class="spacer"></span>
+            <button class="chip" id="net-toggle">网络记录：关</button>
+            <button class="chip" id="console-clear">清空</button>
+          </div>
+          <div id="console-list" class="log-list"></div>
+          <div id="network-list" class="log-list" hidden></div>
+          <div class="eval-row"><span class="prompt">›</span><input id="eval-input" class="input" placeholder="在此执行 JS（Enter 运行，作用于当前网页会话）" /></div>
+        </div>
+      </div>
+
+      <div id="drawer" class="drawer" hidden>
+        <div class="drawer-head"><span>控制台</span><span class="spacer"></span>
+          <button class="chip" id="drawer-clear">清空</button><button class="icon-btn" id="drawer-close">✕</button></div>
+        <div class="log-list" id="drawer-list"></div>
+      </div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="renderer.js"></script>
+</body>
+</html>

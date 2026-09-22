@@ -1,0 +1,187 @@
+'use strict';
+// CLI 客户端：连接已运行的控制入口；不存在时按需拉起（无头守护 / GUI 面板）。
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const net = require('node:net');
+const path = require('node:path');
+const { readState, probe, pidAlive, runtimeDir } = require('../control/state');
+
+const ELECTRON_BIN = require('electron');
+
+function projectRoot() {
+  return path.resolve(__dirname, '..', '..', '..');
+}
+
+function requestOverSocket(socketPath, action, params, { timeoutMs = 15000 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!socketPath || !fs.existsSync(socketPath)) {
+      reject(Object.assign(new Error('控制通道不存在'), { code: 'ENOENT' }));
+      return;
+    }
+    const socket = net.connect(socketPath);
+    let buffer = '';
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, Object.assign(new Error(`控制请求超时（${timeoutMs}ms）：${action}`), { code: 'ETIMEDOUT' })), timeoutMs);
+    socket.setEncoding('utf8');
+    socket.on('connect', () => socket.write(`${JSON.stringify({ id: '1', action, params })}\n`));
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      const idx = buffer.indexOf('\n');
+      if (idx === -1) return;
+      let message;
+      try {
+        message = JSON.parse(buffer.slice(0, idx));
+      } catch (err) {
+        finish(reject, new Error(`控制通道返回了非法 JSON: ${err.message}`));
+        return;
+      }
+      if (message.ok) finish(resolve, message.result);
+      else finish(reject, Object.assign(new Error(message.error || '控制请求失败'), { code: message.code }));
+    });
+    socket.on('error', (err) => finish(reject, err));
+    socket.on('close', () => finish(reject, Object.assign(new Error('控制通道被关闭'), { code: 'ECLOSED' })));
+  });
+}
+
+async function requestOverHttp(port, action, params, { token, timeoutMs = 15000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/${action}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-pvs-token': token || '' },
+      body: JSON.stringify(params || {}),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) throw Object.assign(new Error(payload.error || `HTTP ${response.status}`), { code: payload.code });
+    return payload.result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function send(action, params, { state, timeoutMs } = {}) {
+  const target = state;
+  const errors = [];
+  if (target?.socket) {
+    try {
+      return await requestOverSocket(target.socket, action, params, { timeoutMs });
+    } catch (err) {
+      errors.push(`socket: ${err.message}`);
+    }
+  }
+  if (target?.port) {
+    try {
+      return await requestOverHttp(target.port, action, params, { token: target.token, timeoutMs });
+    } catch (err) {
+      errors.push(`http: ${err.message}`);
+    }
+  }
+  throw Object.assign(new Error(`无法与控制入口通信（${errors.join('; ') || '没有可用入口'}）`), { code: 'EUNREACHABLE' });
+}
+
+/** 找一个可用的控制入口：state.json 探活 → 若进程已死则清理 */
+async function resolveTarget({ prefer = 'auto' } = {}) {
+  const state = readState();
+  if (!state) return { ok: false, reason: 'no-state' };
+  if (!pidAlive(state.pid)) return { ok: false, reason: 'dead', state };
+  if (prefer === 'daemon' && state.mode !== 'daemon') return { ok: false, reason: 'mode-mismatch', state };
+  if (prefer === 'gui' && state.mode !== 'gui') return { ok: false, reason: 'mode-mismatch', state };
+  const alive = await probe(state, { timeoutMs: 800 });
+  if (alive.ok) return { ok: true, state };
+  return { ok: false, reason: alive.reason, state };
+}
+
+function waitForReady({ timeoutMs = 20000, startedAt = Date.now() } = {}) {
+  return new Promise((resolve) => {
+    const tick = async () => {
+      if (Date.now() - startedAt > timeoutMs) {
+        resolve({ ok: false, reason: 'timeout' });
+        return;
+      }
+      const state = readState();
+      if (state && state.startedAt >= startedAt - 250 && pidAlive(state.pid)) {
+        const alive = await probe(state, { timeoutMs: 800 });
+        if (alive.ok) {
+          resolve({ ok: true, state });
+          return;
+        }
+      }
+      setTimeout(tick, 220);
+    };
+    tick();
+  });
+}
+
+/**
+ * 确保有可用的控制入口，必要时拉起进程。
+ * @param {{mode:'auto'|'daemon'|'gui', noSpawn?:boolean, port?:number, quiet?:boolean}} options
+ */
+async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = false } = {}) {
+  const prefer = mode === 'daemon' ? 'daemon' : mode === 'gui' ? 'gui' : 'auto';
+  const found = await resolveTarget({ prefer });
+  if (found.ok) return { state: found.state, spawned: false };
+
+  if (noSpawn) {
+    throw Object.assign(new Error(`没有可用的控制入口（原因：${found.reason || 'unknown'}），且已设置 --no-spawn`), { code: 'ENOENT' });
+  }
+
+  const headless = mode !== 'gui';
+  const args = [projectRoot(), '--headless', ...(port ? ['--port', String(port)] : [])];
+  const child = spawn(ELECTRON_BIN, args, {
+    detached: true,
+    stdio: 'ignore',
+    env: { ...process.env, PREVIEW_STUDIO_HEADLESS: '1' },
+  });
+  child.unref();
+  if (!quiet) process.stderr.write(`[pvs] 启动${headless ? '无头预览服务' : '预览面板'}（pid ${child.pid}）…\n`);
+
+  const startedAt = Date.now();
+  const ready = await waitForReady({ timeoutMs: mode === 'gui' ? 30000 : 25000, startedAt });
+  if (!ready.ok) {
+    throw Object.assign(new Error('启动预览服务超时，请检查 Electron 是否可用（可先运行 npm run build）'), { code: 'ESTART' });
+  }
+  return { state: ready.state, spawned: true, pid: child.pid };
+}
+
+async function stopTarget() {
+  const state = readState();
+  if (!state) return { stopped: false, reason: 'no-state' };
+  if (!pidAlive(state.pid)) return { stopped: false, reason: 'dead', pid: state.pid };
+  try {
+    await send('shutdown', {}, { state, timeoutMs: 4000 });
+  } catch {
+    /* 直接补刀 */
+  }
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (!pidAlive(state.pid)) return { stopped: true, pid: state.pid };
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  try {
+    process.kill(state.pid, 'SIGTERM');
+    return { stopped: true, pid: state.pid, forced: true };
+  } catch {
+    return { stopped: false, pid: state.pid, reason: 'kill-failed' };
+  }
+}
+
+module.exports = {
+  send,
+  ensureTarget,
+  resolveTarget,
+  stopTarget,
+  requestOverSocket,
+  requestOverHttp,
+  waitForReady,
+  runtimeDir,
+  projectRoot,
+};

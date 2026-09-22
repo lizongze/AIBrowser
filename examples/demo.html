@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Preview Studio · 示例页面</title>
+  <link rel="stylesheet" href="demo.css" />
+</head>
+<body>
+  <header class="hero">
+    <h1>Preview Studio</h1>
+    <p>这是用 Chromium 内核渲染的本地页面，支持相对路径的 CSS / JS。</p>
+    <button id="btn">点我计数：<span id="count">0</span></button>
+  </header>
+  <main class="grid">
+    <section class="card"><h2>① 网页预览</h2><p>原生 Chromium 渲染，可调试、可截图、可执行 JS。</p></section>
+    <section class="card"><h2>② 代码高亮</h2><p>CodeMirror 6 高亮 + 行号 + 搜索 + 保存。</p></section>
+    <section class="card"><h2>③ 给 AI 调用</h2><p>pvs CLI / HTTP 控制通道，无头也能跑。</p></section>
+  </main>
+  <script src="demo.js"></script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>字体检对比 · Preview Studio</title>
+  <style>
+    :root {
+      --text: #14181d;
+      --muted: #454d57;
+      --line: #e2e6eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px 32px 60px;
+      background: #fff;
+      color: var(--text);
+      font: 13px/1.6 system-ui, sans-serif;
+    }
+    h1 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+    .lead { margin: 0 0 22px; color: var(--muted); font-size: 12.5px; }
+    .row {
+      display: grid;
+      grid-template-columns: 190px 1fr;
+      gap: 16px;
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+      align-items: start;
+    }
+    .name { font-size: 12px; color: var(--muted); }
+    .name b { display: block; color: var(--text); font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+    .sample { font-size: 13px; line-height: 1.75; color: var(--muted); letter-spacing: 0.015em; }
+    .sample .title { display: block; color: var(--text); font-size: 14px; font-weight: 600; letter-spacing: 0.01em; margin-bottom: 2px; }
+    .sample .big { font-size: 15px; }
+    .tips { margin-top: 24px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 12.5px; }
+    .tips b { color: var(--text); }
+    code { background: #f1f3f6; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>字体检对比</h1>
+  <p class="lead">下面每行用同一条界面文案，只换字体。挑一个你觉得最清楚的，把编号告诉我，我把默认字体改成它。</p>
+
+  <div class="row">
+    <div class="name"><b>① 微软雅黑</b>Microsoft YaHei</div>
+    <div class="sample" style="font-family:'Microsoft YaHei UI','Microsoft YaHei'">
+      <span class="title">没有打开的标签</span>
+      点标签条末尾的 ＋ 新建标签，或在上方地址栏输入 URL / 文件路径，也可以从左侧文件树点文件打开
+      <div class="big">代码预览 · 控制台 · 界面缩放 125% · 文件树</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="name"><b>② 等线</b>DengXian</div>
+    <div class="sample" style="font-family:'DengXian'">
+      <span class="title">没有打开的标签</span>
+      点标签条末尾的 ＋ 新建标签，或在上方地址栏输入 URL / 文件路径，也可以从左侧文件树点文件打开
+      <div class="big">代码预览 · 控制台 · 界面缩放 125% · 文件树</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="name"><b>③ 黑体</b>SimHei</div>
+    <div class="sample" style="font-family:'SimHei'">
+      <span class="title">没有打开的标签</span>
+      点标签条末尾的 ＋ 新建标签，或在上方地址栏输入 URL / 文件路径，也可以从左侧文件树点文件打开
+      <div class="big">代码预览 · 控制台 · 界面缩放 125% · 文件树</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="name"><b>④ 文泉驿正黑</b>WenQuanYi Zen Hei</div>
+    <div class="sample" style="font-family:'WenQuanYi Zen Hei'">
+      <span class="title">没有打开的标签</span>
+      点标签条末尾的 ＋ 新建标签，或在上方地址栏输入 URL / 文件路径，也可以从左侧文件树点文件打开
+      <div class="big">代码预览 · 控制台 · 界面缩放 125% · 文件树</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="name"><b>⑤ DejaVu Sans</b>（改造前实际用的）</div>
+    <div class="sample" style="font-family:'DejaVu Sans'">
+      <span class="title">没有打开的标签</span>
+      点标签条末尾的 ＋ 新建标签，或在上方地址栏输入 URL / 文件路径，也可以从左侧文件树点文件打开
+      <div class="big">代码预览 · 控制台 · 界面缩放 125% · 文件树</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="name"><b>⑥ 系统默认</b>sans-serif</div>
+    <div class="sample" style="font-family:sans-serif">
+      <span class="title">没有打开的标签</span>
+      点标签条末尾的 ＋ 新建标签，或在上方地址栏输入 URL / 文件路径，也可以从左侧文件树点文件打开
+      <div class="big">代码预览 · 控制台 · 界面缩放 125% · 文件树</div>
+    </div>
+  </div>
+
+  <div class="tips">
+    <b>顺便说明</b>：为了让 WSL 里有可用的中文字体，我已把 Windows 的
+    <code>msyh.ttc</code>（微软雅黑）、<code>simhei.ttf</code>（黑体）、<code>Deng.ttf</code>（等线）
+    复制到 <code>~/.fonts</code> 并刷新了字体缓存。想撤掉只需删除 <code>~/.fonts</code> 里这几个文件。
+  </div>
+</body>
+</html>
