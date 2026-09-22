@@ -9,6 +9,7 @@ const DEFAULTS = {
   uiScale: 1, // 面板界面缩放（1 = 100%）
   theme: 'light',
   sidebar: false,
+  hotReload: false, // 热重载默认关闭（按需开启，避免持续轮询文件）
 };
 
 function configPath() {

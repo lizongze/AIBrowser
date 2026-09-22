@@ -166,6 +166,33 @@ async function main() {
   check(saved.ok, 'Ctrl+S 保存确实写入磁盘');
   fs.rmSync(sandboxDir, { recursive: true, force: true });
 
+  // 热重载：默认关闭，开启后文件变化会自动刷新
+  const hotDefault = await api('panelState');
+  check(hotDefault.state.hotReload === false, '热重载默认关闭', String(hotDefault.state.hotReload));
+  const hotOn = await api('panelAction', { action: 'hot-reload', payload: { enabled: true } });
+  check(hotOn.result.hotReload === true, '可开启热重载', JSON.stringify(hotOn.result));
+  // 打开示例页并改文件，验证真的会刷新
+  await api('openPath', { path: htmlFile });
+  await waitFor(async () => {
+    const s = await api('panelState');
+    return s.state.view === 'web' ? { ok: true } : { ok: false };
+  }, { label: '切到网页会话' });
+  const originalHtml = fs.readFileSync(htmlFile, 'utf8');
+  fs.writeFileSync(htmlFile, originalHtml.replace('<h1>', '<h1 data-hot="1">热重载 '));
+  const reloaded = await waitFor(async () => {
+    const r = await api('eval', { expression: 'document.querySelector("h1").hasAttribute("data-hot")' });
+    return r.value === 'true' ? { ok: true } : { ok: false };
+  }, { label: '热重载生效', timeoutMs: 8000 });
+  fs.writeFileSync(htmlFile, originalHtml);
+  check(reloaded.ok, '开启后改文件会自动刷新页面');
+  const hotOff = await api('panelAction', { action: 'hot-reload', payload: { enabled: false } });
+  check(hotOff.result.hotReload === false, '可关闭热重载', JSON.stringify(hotOff.result));
+  fs.writeFileSync(htmlFile, originalHtml.replace('<h1>', '<h1 data-off="1">不应刷新 '));
+  await sleep(2500);
+  const stillOld = await api('eval', { expression: 'document.querySelector("h1").hasAttribute("data-off")' });
+  fs.writeFileSync(htmlFile, originalHtml);
+  check(stillOld.value === 'false', '关闭后改文件不再刷新');
+
   // 全屏预览：需要在「网页会话」下测（代码面板没有原生视图，槽位为 0）
   await api('openPath', { path: htmlFile });
   await waitFor(async () => {

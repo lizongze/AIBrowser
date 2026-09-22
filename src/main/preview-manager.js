@@ -26,6 +26,22 @@ class PreviewManager {
     /** @type {{x:number,y:number,width:number,height:number}|null} */
     this.viewBounds = null;
     this.activeViewId = null;
+    /** 热重载开关（由主进程按配置/参数设置；默认关闭） */
+    this.hotReload = false;
+  }
+
+  /** 运行中切换所有会话的热重载 */
+  setHotReload(enabled) {
+    this.hotReload = Boolean(enabled);
+    for (const session of this.sessions.values()) {
+      try {
+        session.setHotReload(this.hotReload);
+      } catch {
+        /* 单个会话失败不影响其它 */
+      }
+    }
+    this.deps.broadcast('sessions:updated', { sessions: this.list() });
+    return this.hotReload;
   }
 
   setGuiWindow(win) {
@@ -41,6 +57,7 @@ class PreviewManager {
     const session = new PreviewSession({
       files: this.files,
       host: this.host,
+      hotReload: this.hotReload,
       urlForFile: (file) => this.urlForFile(file),
       onPopup: (owner, url) => this.open({ url, focus: true }),
       onConsole: (s, entry) => this.deps.broadcast('console:entry', { sessionId: s.id, entry }),

@@ -277,6 +277,17 @@ function registerIpc() {
   // UI
   // 界面缩放：Ctrl+滚轮 / 菜单 / Ctrl+0 重置。webContents 自带 zoom 因子，
   // 与页面预览的缩放（session.setZoom）互不影响。
+  // 热重载开关（标题栏 ⟳ 按钮 / 菜单）
+  handle('ui:hotReload', (payload) => {
+    const enabled = typeof payload.enabled === 'boolean'
+      ? payload.enabled
+      : !state.manager.hotReload;
+    state.manager.setHotReload(enabled);
+    config.write({ hotReload: enabled });
+    process.stderr.write(`[aibrowser] 热重载 ${enabled ? '已开启（轮询本地文件变化）' : '已关闭'}\n`);
+    return { enabled };
+  });
+
   handle('ui:zoom', (payload) => {
     const win = state.window;
     if (!win || win.isDestroyed()) return { factor: 1 };
@@ -329,6 +340,7 @@ function registerIpc() {
   });
   handle('ui:info', () => ({
     zoomFactor: state.window && !state.window.isDestroyed() ? state.window.webContents.getZoomFactor() : 1,
+    hotReload: state.manager ? state.manager.hotReload : false,
     shortcut: {
       openFolder: 'Ctrl/Cmd+O',
       reload: 'Ctrl/Cmd+R',
@@ -368,6 +380,7 @@ function buildMenu() {
         { label: '显示/隐藏文件树', accelerator: 'CmdOrCtrl+B', click: () => broadcast('ui:command', { command: 'toggle-sidebar' }) },
         { type: 'separator' },
         { label: '控制台', accelerator: 'CmdOrCtrl+J', click: () => broadcast('ui:command', { command: 'toggle-console' }) },
+        { label: '热重载（文件变化自动刷新）', accelerator: 'CmdOrCtrl+Shift+H', click: () => broadcast('ui:command', { command: 'toggle-hot-reload' }) },
         { label: '全屏预览（只留标签页）', accelerator: 'CmdOrCtrl+Shift+M', click: () => broadcast('ui:command', { command: 'toggle-content-only' }) },
         { type: 'separator' },
         { label: '界面放大', accelerator: 'CmdOrCtrl+Shift+Plus', click: () => broadcast('ui:command', { command: 'ui-zoom-in' }) },
@@ -410,6 +423,14 @@ async function bootstrap() {
   createManager();
   // 无头模式使用离屏渲染：窗口隐藏且不进任务栏，桌面上不会闪现
   if (isHeadless) state.manager.setHost('offscreen');
+
+  // 热重载：命令行 --hot-reload / --no-hot-reload 优先，否则用持久化配置（默认关闭）
+  const configHotReload = flags['hot-reload'] === true ? true
+    : flags['no-hot-reload'] === false ? false
+      : flags['no-hot-reload'] === true ? false
+        : config.read().hotReload === true;
+  state.manager.setHotReload(configHotReload);
+  config.write({ hotReload: configHotReload });
 
   state.pendingRequests = [];
   state.server = new ControlServer({

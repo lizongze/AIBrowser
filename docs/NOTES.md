@@ -61,6 +61,18 @@ fc-cache -f ~/.fonts
 
 `Cascadia Code`（微软开源）与 `Consolas` 都可自由分发；`msyh.ttc` 仅建议在本机使用，不要随项目分发。
 
+## 热重载
+
+默认**关闭**（不做任何文件轮询）。三种开启方式：
+
+```bash
+electron . --hot-reload          # 启动时开启（与配置一起生效，参数优先）
+# 或点标题栏 ⟳ / 按 Ctrl+Shift+H / 菜单「热重载」
+```
+
+状态持久化在运行时目录的 `config.json`（`hotReload`）。关闭状态可用 `--no-hot-reload` 强制覆盖。
+开启后每 0.6s 轮询被预览文件所在目录中的 `html/css/js/json/svg/md`，变化即自动刷新页面。
+
 ## WSL / 容器兼容
 
 已内置 `--no-sandbox`、`--disable-gpu`、`--disable-dev-shm-usage`，无需手工配置。

@@ -57,6 +57,7 @@ class PreviewSession {
     this.networkEnabled = false;
     this.consoleOpen = false;
     this.zoomFactor = 1;
+    this.hotReload = Boolean(ctx.hotReload); // 热重载默认关闭
     this.host = ctx.host || 'window'; // 'window' | 'view'
     this.createdAt = Date.now();
     this.lastError = null;
@@ -342,7 +343,28 @@ class PreviewSession {
    * 之所以不用 fs.watch —— 在 WSL 的 /mnt/* 挂载（9p）上 inotify 事件经常丢失，
    * 而轮询在同一份代码里跨平台都可靠，代价只是 600ms 一次 stat。
    */
+  /** 关闭轮询（热重载被关掉时调用） */
+  stopPolling() {
+    if (this._poller) clearInterval(this._poller);
+    this._poller = null;
+  }
+
+  /** 运行中切换热重载：开启即开始轮询并建立基线，关闭即停 */
+  setHotReload(enabled) {
+    this.hotReload = Boolean(enabled);
+    if (this.hotReload && this.hasHost) {
+      if (this.file) this.watchProjectDir(path.dirname(this.file));
+      this.pollFiles();
+      this.startPolling();
+    } else {
+      this.stopPolling();
+    }
+    return this.hotReload;
+  }
+
   startPolling() {
+    // 热重载默认关闭：没开就完全不轮询文件
+    if (!this.hotReload) return;
     if (this._poller) return; // 面板会话与无头会话都需要热重载，不按宿主区分
     this._poller = setInterval(() => {
       try {
@@ -401,6 +423,7 @@ class PreviewSession {
   }
 
   scheduleReload(reason) {
+    if (!this.hotReload) return;
     if (this.reloadTimer) clearTimeout(this.reloadTimer);
     this.reloadTimer = setTimeout(() => {
       this.reloadTimer = null;

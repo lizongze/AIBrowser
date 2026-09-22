@@ -17,6 +17,7 @@ const el = {
   btnOpenFolder: $('btn-open-folder'),
   btnSidebar: $('btn-sidebar'),
   sidebar: $('sidebar'),
+  btnHotReload: $('btn-hot-reload'),
   btnConsole: $('btn-console'),
   btnFullscreen: $('btn-fullscreen'),
   btnTheme: $('btn-theme'),
@@ -71,6 +72,7 @@ const state = {
   sidebar: false, // 默认隐藏左侧文件树，专注预览内容
   contentOnly: false, // 全屏预览：隐藏标题栏与工具栏，只留标签条
   uiScale: 1, // 面板界面缩放（Ctrl+滚轮 / Ctrl+Shift+= / Ctrl+0）
+  hotReload: false, // 热重载默认关闭，按需开启
   consoleTab: 'console',
   consoleFilterSession: null,
   networkEnabled: false,
@@ -1013,6 +1015,7 @@ function wireEvents() {
   // 抽屉
   el.btnSidebar.addEventListener('click', () => setSidebar(!state.sidebar));
   // 控制台图标：在「控制台面板」与「原来的预览视图」之间来回切
+  el.btnHotReload.addEventListener('click', () => setHotReload(!state.hotReload, { notify: true }));
   el.btnConsole.addEventListener('click', () => toggleConsole());
   el.btnFullscreen.addEventListener('click', () => toggleContentOnly());
   el.drawerClose.addEventListener('click', () => {
@@ -1149,6 +1152,23 @@ function stepUiScale(delta) {
   toast(`界面缩放 ${Math.round(state.uiScale * 100)}%`, 'info', 1200);
 }
 
+/**
+ * 热重载开关：默认关闭。开启后每 0.6s 轮询被预览文件所在目录，变化即自动刷新页面。
+ * notify=false 用于「跟随主进程状态」的场景，避免来回回声。
+ */
+function setHotReload(enabled, { notify = false } = {}) {
+  state.hotReload = Boolean(enabled);
+  el.btnHotReload.classList.toggle('on', state.hotReload);
+  el.btnHotReload.title = state.hotReload
+    ? '热重载：开（文件变化自动刷新，点击关闭）'
+    : '热重载：关（点击开启）';
+  if (notify) {
+    window.api.ui.hotReload(state.hotReload).catch(() => {});
+    toast(state.hotReload ? '热重载已开启' : '热重载已关闭', 'info', 1600);
+    setStatus(state.hotReload ? '热重载：开' : '热重载：关', 'ok');
+  }
+}
+
 /** 控制台开关：打开控制台面板 / 回到原来的预览视图 */
 function toggleConsole() {
   const open = state.view === 'console';
@@ -1247,6 +1267,7 @@ function wireEventsFromMain() {
     const command = payload.command;
     if (command === 'toggle-sidebar') setSidebar(!state.sidebar);
     if (command === 'toggle-console') toggleConsole();
+    if (command === 'toggle-hot-reload') setHotReload(!state.hotReload, { notify: true });
     if (command === 'toggle-content-only') toggleContentOnly();
     if (command === 'ui-zoom-in') stepUiScale(0.1);
     if (command === 'ui-zoom-out') stepUiScale(-0.1);
@@ -1321,6 +1342,7 @@ window.__PVS_ACTION__ = (action, payload = {}) => {
     }
     case 'save': saveActiveCode(); return { saving: true };
     case 'toggle-console': toggleConsole(); return { view: state.view };
+    case 'hot-reload': setHotReload(payload.enabled, { notify: payload.notify !== false }); return { hotReload: state.hotReload };
     case 'content-only': toggleContentOnly(payload.visible); return { contentOnly: state.contentOnly };
     case 'ui-zoom': applyUiScale(payload.factor, { persist: false }); return { uiScale: state.uiScale };
     case 'font-report': {
@@ -1400,6 +1422,7 @@ window.__PVS_PANEL__ = () => {
     bodyBg: getComputedStyle(document.body).backgroundColor,
     openMode: state.openMode || 'web',
     uiScale: state.uiScale,
+    hotReload: state.hotReload,
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
     dataView: document.body.dataset.view,
@@ -1444,6 +1467,7 @@ async function boot() {
   try {
     const zoom = await window.api.ui.info();
     if (zoom && typeof zoom.zoomFactor === 'number') state.uiScale = zoom.zoomFactor;
+    if (zoom && typeof zoom.hotReload === 'boolean') setHotReload(zoom.hotReload);
   } catch {
     /* ignore */
   }
