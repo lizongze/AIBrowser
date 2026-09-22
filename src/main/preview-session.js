@@ -109,9 +109,13 @@ class PreviewSession {
       this.window = null;
       this.webContents = this.view.webContents;
     } else if (this.host === 'offscreen') {
-      // 无头模式：离屏渲染 + 隐藏窗口。窗口始终 show:false 且不进任务栏，
-      // 因此在 WSLg / 桌面环境下都不会闪现；截图取 paint 事件的位图。
+      // 无头模式：离屏渲染 + 不进任务栏的窗口。
+      // Windows 上完全 show:false 的窗口不参与合成，paint 事件与 capturePage 都拿不到帧
+      // （实测截图 0×0）。因此把它放在所有显示器之外「显示」出来：用户看不到，
+      // 但窗口会被正常合成，截图可用。
+      const offscreenPosition = process.platform === 'win32' ? { x: -20000, y: -20000 } : {};
       this.window = new BrowserWindow({
+        ...offscreenPosition,
         width: DEFAULT_WIDTH,
         height: DEFAULT_HEIGHT,
         show: false,
@@ -119,8 +123,19 @@ class PreviewSession {
         focusable: false,
         title: 'AIBrowser',
         backgroundColor: '#ffffff',
-        webPreferences: { ...webPreferences, offscreen: true },
+        // Windows 上不用 offscreen：该模式在本平台不产出帧（paint 与 capturePage 都为空）。
+        // 装到屏幕外 + capturePage 才可靠。
+        webPreferences: process.platform === 'win32' ? webPreferences : { ...webPreferences, offscreen: true },
       });
+      if (process.platform === 'win32') {
+        // showInactive：不抢焦点；窗口在屏幕外，用户看不到
+        try {
+          this.window.showInactive();
+          this.host = 'window';
+        } catch {
+          /* 忽略 */
+        }
+      }
       this.view = null;
       this.webContents = this.window.webContents;
       this._offscreenFrame = null;
@@ -470,26 +485,66 @@ class PreviewSession {
   // ---------- 能力 ----------
 
   /** 截图取帧：离屏会话用 paint 事件的位图；面板/窗口会话用 capturePage */
+  /**
+   * 取一帧画面。
+   * 关键：空帧（isEmpty 或尺寸为 0）必须视为失败，否则会把 0×0 的图当成有效截图。
+   * 平台差异：
+   *   - 离屏渲染（Linux/WSLg）：等 paint 事件产出位图，必要时 invalidate 触发重绘；
+   *   - Windows：离屏模式不产出帧，改用屏幕外窗口 + capturePage，并轮询等待首帧。
+   */
   async grabFrame(rect) {
-    if (this.host !== 'offscreen') return this.webContents.capturePage(rect);
+    const usable = (image) => {
+      if (!image) return false;
+      if (image.isEmpty()) return false;
+      const size = image.getSize();
+      return size.width > 0 && size.height > 0;
+    };
 
-    // 离屏渲染：优先用 paint 事件产出的帧。
-    // 部分环境（例如无 GPU 的 WSL）不会自动产出帧，此时主动 invalidate 触发一次重绘。
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      for (let i = 0; i < 30; i += 1) {
-        if (this._offscreenFrame && !this._offscreenFrame.isEmpty()) return this._offscreenFrame;
-        await new Promise((resolve) => setTimeout(resolve, 50));
+    if (this.host === 'offscreen' && process.platform !== 'win32') {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        for (let i = 0; i < 30; i += 1) {
+          if (usable(this._offscreenFrame)) return this._offscreenFrame;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        try {
+          this.webContents.invalidate();
+        } catch {
+          /* ignore */
+        }
       }
+    }
+
+    // 通用路径：capturePage，轮询等待首帧（页面加载/合成都需要时间）
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
       try {
-        this.webContents.invalidate();
+        const shot = rect ? await this.webContents.capturePage(rect) : await this.webContents.capturePage();
+        if (usable(shot)) return shot;
+      } catch {
+        /* 继续重试 */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    // 最后再试整窗截图（窗口不可见/被裁剪时可能反而可用）
+    if (this.window && !this.window.isDestroyed()) {
+      try {
+        const windowShot = await this.window.capturePage();
+        if (usable(windowShot)) return windowShot;
       } catch {
         /* ignore */
       }
     }
-    // 最后的兜底：窗口本就不可见（show:false + skipTaskbar），capturePage 不会打扰用户
-    const image = await this.webContents.capturePage(rect);
-    if (image && !image.isEmpty()) return image;
-    throw new Error('离屏渲染没有产出画面（页面可能仍在加载，或该环境不支持离屏渲染）');
+
+    throw new Error(
+      '当前环境取不到渲染帧'
+      + `（platform=${process.platform}`
+      + ` host=${this.host}`
+      + ` visible=${this.window && !this.window.isDestroyed() ? this.window.isVisible() : 'n/a'}`
+      + ` loading=${this.loading}`
+      + ` offscreenFrame=${this._offscreenFrame ? (usable(this._offscreenFrame) ? 'ok' : 'empty') : 'none'}`
+      + ` size=${this.window && !this.window.isDestroyed() ? this.window.getContentSize().join('x') : 'n/a'}）`,
+    );
   }
 
   async screenshot({ format = 'png', quality, fullPage = false, selector } = {}) {

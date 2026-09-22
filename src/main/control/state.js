@@ -35,6 +35,12 @@ function statePath() {
 }
 
 function socketPath() {
+  // Windows 不支持「文件路径形式的」Unix socket：必须用命名管道。
+  // 之前直接拼 control.sock 会导致 listen EACCES，CLI 在 Windows 上完全不可用。
+  if (process.platform === 'win32') {
+    const user = (process.env.USERNAME || process.env.USER || 'default').replace(/[^\w.-]/g, '');
+    return `\\\\.\\pipe\\aibrowser-control-${user}`;
+  }
   return path.join(runtimeDir(), 'control.sock');
 }
 

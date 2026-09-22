@@ -32,7 +32,11 @@ async function runSmokeTest({ manager, files, server, app }) {
 
   // 1. 控制服务
   check(Boolean(server.port), '控制服务已监听', `http://127.0.0.1:${server.port}`);
-  check(fs.existsSync(server.state.socket), '控制 socket 已就绪', server.state.socket);
+  // Windows 上是命名管道（\\.\pipe\...），existsSync 需要特定写法，这里按平台判断
+  const socketReady = process.platform === 'win32'
+    ? Boolean(server.socketBound)
+    : fs.existsSync(server.state.socket);
+  check(socketReady, '控制通道已就绪', server.socketBound === false ? `未绑定：${server.socketNote || ''}` : server.state.socket);
 
   // 2. 打开本地页面
   let session;

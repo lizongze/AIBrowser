@@ -130,6 +130,9 @@ function detectScaleFactor(explicit = null) {
  * 用 1.25 则还需要额外的 1.2 倍小数重采样，笔画会发虚。
  */
 function wslgRecommendedScale() {
+  // 只在 WSLg 下纠正：Windows 原生运行会自己读系统缩放（150% 等），
+  // 再叠加 force-device-scale-factor 会放大成 2.25 倍。
+  if (!isWsl()) return null;
   const configured = env('WSLG_SCALE');
   if (configured === '0') return null;
   if (configured) {

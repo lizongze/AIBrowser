@@ -15,7 +15,7 @@ const ALIASES = {
 const BOOLEAN_FLAGS = new Set([
   'help', 'version', 'json', 'new', 'daemon', 'gui', 'headless', 'no-spawn',
   'full-page', 'hard', 'clear', 'html', 'on', 'off', 'all', 'quiet', 'verbose', 'open', 'force-daemon',
-  'hot-reload', 'no-hot-reload',
+  'hot-reload', 'no-hot-reload', 'win', 'wsl',
 ]);
 
 const VALUE_FLAGS = new Set([

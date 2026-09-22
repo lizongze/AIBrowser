@@ -8,9 +8,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const runtimeDir = process.env.XDG_RUNTIME_DIR
-  ? path.join(process.env.XDG_RUNTIME_DIR, 'aibrowser')
-  : path.join(process.env.HOME, '.aibrowser');
+// 运行时目录：与 src/main/control/state.js 的规则保持一致（Windows 上没有 XDG_RUNTIME_DIR）
+const runtimeDir = process.env.AIBROWSER_RUNTIME || process.env.PREVIEW_STUDIO_RUNTIME
+  ? path.resolve(process.env.AIBROWSER_RUNTIME || process.env.PREVIEW_STUDIO_RUNTIME)
+  : process.env.XDG_RUNTIME_DIR
+    ? path.join(process.env.XDG_RUNTIME_DIR, 'aibrowser')
+    : path.join(os.homedir(), '.aibrowser');
 const statePath = path.join(runtimeDir, 'state.json');
 
 const results = [];
@@ -74,13 +77,30 @@ async function waitFor(check, { timeoutMs = 8000, intervalMs = 300, label = '条
 
 async function main() {
   console.log('AIBrowser 端到端验收\n');
-  try { fs.writeFileSync('/tmp/pvs-verify-gui.log', ''); } catch { /* ignore */ }
+  try { fs.writeFileSync(path.join(os.tmpdir(), 'pvs-verify-gui.log'), ''); } catch { /* ignore */ }
   spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'stop'], { stdio: 'ignore' });
   await sleep(1200);
 
-  const child = spawn(path.join(root, 'node_modules', '.bin', 'electron'),
-    [root, '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
-    { cwd: root, detached: true, stdio: ['ignore', 'ignore', fs.openSync('/tmp/pvs-verify-gui.log', 'w')] });
+  // Windows 上可执行文件是 electron.cmd，且 WSLg/容器的开关不需要
+  // Windows 上不用 .cmd 包装（Node 24 直接 spawn .cmd 会 EINVAL），指向真实 exe。
+  // 依赖可能在 node_modules（WSL 装的 Linux 版）或 node_modules.win*（Windows 原生版），
+  // 按平台与存在性挑选。
+  const electron = (() => {
+    if (process.platform !== 'win32') return path.join(root, 'node_modules', '.bin', 'electron');
+    const candidates = ['node_modules.win', 'node_modules.win2', 'node_modules.win3', 'node_modules']
+      .flatMap((dir) => [
+        path.join(root, dir, 'node_modules', 'electron', 'dist', 'electron.exe'),
+        path.join(root, dir, 'electron', 'dist', 'electron.exe'),
+      ]);
+    const found = candidates.find((file) => fs.existsSync(file));
+    if (!found) throw new Error('找不到 Windows 版 Electron：请先运行 start-windows.cmd 安装依赖');
+    return found;
+  })();
+  const launchArgs = process.platform === 'win32'
+    ? [root]
+    : [root, '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'];
+  const child = spawn(electron, launchArgs,
+    { cwd: root, detached: true, stdio: ['ignore', 'ignore', fs.openSync(path.join(os.tmpdir(), 'pvs-verify-gui.log'), 'w')] });
   child.unref();
 
   const state = await waitReady();
@@ -299,7 +319,7 @@ async function main() {
 
   console.log('\n--- GUI 启动日志 ---');
   try {
-    for (const line of fs.readFileSync('/tmp/pvs-verify-gui.log', 'utf8').trim().split('\n').slice(-10)) console.log('   ' + line);
+    for (const line of fs.readFileSync(path.join(os.tmpdir(), 'pvs-verify-gui.log'), 'utf8').trim().split('\n').slice(-10)) console.log('   ' + line);
   } catch { /* ignore */ }
 
   const passed = results.filter(Boolean).length;

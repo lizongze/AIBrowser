@@ -12,6 +12,22 @@
 
 ---
 
+## 界面预览
+
+全屏预览模式下的代码高亮（Cascadia Code，默认全屏时隐藏标题栏与工具栏，只留标签页）：
+
+| JavaScript | CSS |
+| --- | --- |
+| ![代码预览 · JavaScript](images/code-javascript.png) | ![代码预览 · CSS](images/code-css.png) |
+
+| CLI 实现（151KB） | 单文件千行代码 |
+| --- | --- |
+| ![代码预览 · CLI](images/code-cli.png) | ![大文件代码预览](images/code-large-file.png) |
+
+| Markdown | 网页预览（Chromium 渲染） |
+| --- | --- |
+| ![Markdown 预览](images/code-markdown.png) | ![网页预览](images/web-preview.png) |
+
 ## 快速开始
 
 ```bash

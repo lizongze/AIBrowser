@@ -20,7 +20,13 @@ const explicitScale = (() => {
   return null;
 })();
 const scaleInfo = detectScaleFactor(explicitScale);
-const wslgScale = scaleInfo.scale ? null : wslgRecommendedScale();
+// --win：明确告知「在 Windows 原生运行」。
+// 原生下 Electron 会自己读系统缩放（如 150%），再叠加 force-device-scale-factor 会放大成 2.25 倍。
+// 注意：这里必须直接看原始 argv —— 命令行解析（flags）发生在这段代码之后，用 flags 会踩 TDZ。
+const rawArgv = process.argv.slice(1);
+const nativeWindows = rawArgv.includes('--win')
+  || (process.platform === 'win32' && !process.env.WSL_DISTRO_NAME);
+const wslgScale = (scaleInfo.scale || nativeWindows) ? null : wslgRecommendedScale();
 if (scaleInfo.scale) {
   // 显式指定（--scale-factor / AIBROWSER_SCALE）永远优先
   app.commandLine.appendSwitch('force-device-scale-factor', String(scaleInfo.scale));

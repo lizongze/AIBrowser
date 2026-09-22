@@ -1,50 +1,93 @@
 @echo off
 REM ============================================================================
-REM  AIBrowser —— 在 Windows 原生运行（推荐）
+REM  AIBrowser - run natively on Windows (best rendering quality)
 REM
-REM  为什么推荐：WSL 里的图形窗口要经过 WSLg 的远程呈现层（RDP/Weston）送到
-REM  笔记本屏幕，最终按屏幕比例缩放后才显示，字号与笔画会被重采样，观感明显
-REM  不如原生 Chrome / 原生应用。在 Windows 上直接跑 Electron 没有这一层，
-rem  渲染质量与 Chrome 完全一致。
+REM  Why native: inside WSL the window goes through WSLg remote compositing, so
+REM  the app only gets a window-sized canvas (measured 1524x927) which WSLg then
+REM  scales up to the physical 3072x1920 panel. Native Windows compositing has no
+REM  such layer - text quality equals Chrome.
 REM
-REM  用法：双击本文件即可。首次运行需要联网（下载 Windows 版 Electron 约 100MB）。
+REM  Windows and WSL cannot share node_modules (Electron and esbuild ship
+REM  platform-specific binaries), so this script keeps a separate Windows set in
+REM  node_modules.win and leaves the WSL side untouched.
+REM
+REM  Usage: double-click this file.
 REM ============================================================================
-setlocal
+setlocal enabledelayedexpansion
+chcp 65001 >nul 2>nul
 cd /d "%~dp0"
 
-echo [1/3] 检查 Node.js ...
+echo ============================================
+echo  AIBrowser - Windows native
+echo ============================================
+echo.
+
 where node >nul 2>nul
-if errorlevel 1 (
-  echo   ✗ 没找到 node，请先安装 Node.js 18+：https://nodejs.org/
-  pause
-  exit /b 1
-)
-for /f "delims=" %%v in ('node -v') do echo   ✓ Node %%v
+if errorlevel 1 goto no_node
+for /f "delims=" %%v in ('node -v') do echo [1/4] Node.js %%v
 
-if not exist "node_modules\electron\package.json" goto install
-findstr /c:"\"electron\"" package.json >nul 2>nul || goto install
-echo [2/3] 依赖看起来已就绪，跳过安装。
-goto build
-
-:install
-echo [2/3] 安装依赖（首次较慢，会下载 Windows 版 Electron）...
-call npm install --no-audit --no-fund
-if errorlevel 1 (
-  echo   ✗ 依赖安装失败，请检查网络后重试
-  pause
-  exit /b 1
-)
+call :try_dir node_modules.win
+if defined WIN_DIR goto build
+echo       first candidate unavailable, trying another folder name ...
+call :try_dir node_modules.win2
+if defined WIN_DIR goto build
+call :try_dir node_modules.win3
+if defined WIN_DIR goto build
+echo [X] Could not prepare a Windows dependency directory.
+echo     A leftover folder may be locked. Delete node_modules.win* in Explorer and retry.
+pause
+exit /b 1
 
 :build
-echo [3/3] 构建渲染层并启动面板 ...
-call npm run build
-if errorlevel 1 (
-  echo   ✗ 构建失败
-  pause
-  exit /b 1
-)
+echo [3/4] Building renderer ...
+set "NODE_PATH=%~dp0%WIN_DIR%\node_modules"
+call node scripts\build.mjs
+if errorlevel 1 goto build_fail
 
+echo [4/4] Starting AIBrowser (close this window to quit)
 echo.
-echo 启动 AIBrowser（关闭本窗口即可退出）
-call npx electron . %*
+call "%WIN_BIN%\electron.cmd" . --win %*
+goto end
+
+REM ---- prepare one dependency dir; leaves WIN_DIR empty on failure ----
+:try_dir
+set "WIN_DIR="
+set "CAND=%~1"
+set "CAND_BIN=%CAND%\node_modules\.bin"
+if not exist "%CAND%\node_modules\electron\package.json" goto install_cand
+if not exist "%CAND_BIN%\esbuild.cmd" goto install_cand
+echo [2/4] Dependencies ready in %CAND% - skipping install
+set "WIN_DIR=%CAND%"
+set "WIN_BIN=%CAND_BIN%"
+exit /b 0
+
+:install_cand
+echo [2/4] Installing Windows dependencies into %CAND% ...
+echo        first run downloads about 150 MB, please wait
+if not exist "%CAND%" mkdir "%CAND%"
+node "scripts\make-native-manifest.mjs" "%CAND%" >nul
+if errorlevel 1 exit /b 1
+pushd "%CAND%"
+call npm install --no-audit --no-fund
+set "NPM_RESULT=!errorlevel!"
+popd
+if not "!NPM_RESULT!"=="0" exit /b 1
+if not exist "%CAND_BIN%\electron.cmd" exit /b 1
+if not exist "%CAND_BIN%\esbuild.cmd" exit /b 1
+echo       OK
+set "WIN_DIR=%CAND%"
+set "WIN_BIN=%CAND_BIN%"
+exit /b 0
+
+:no_node
+echo [X] Node.js not found. Install Node 18+ from https://nodejs.org/
+pause
+exit /b 1
+
+:build_fail
+echo [X] Build failed.
+pause
+exit /b 1
+
+:end
 endlocal

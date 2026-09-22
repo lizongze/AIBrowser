@@ -327,7 +327,6 @@ function baseExtensions() {
       '.cm-activeLineGutter': { backgroundColor: 'rgba(76,141,255,0.08)' },
       '&.cm-focused': { outline: 'none' },
       '.cm-panels': { backgroundColor: 'var(--elev)', color: 'var(--text)' },
-      '.cm-gutters': { backgroundColor: 'var(--bg)', borderRight: '1px solid var(--border)', color: 'var(--muted)' },
       '.cm-searchMatch': { backgroundColor: 'rgba(210,153,34,0.3)' },
       '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'rgba(210,153,34,0.55)' },
       '.cm-selectionBackground, ::selection': { backgroundColor: 'var(--sel) !important' },
