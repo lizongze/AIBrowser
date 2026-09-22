@@ -191,7 +191,7 @@ function mimeFor(file) {
 }
 
 function defaultRoot() {
-  return process.env.PREVIEW_STUDIO_ROOT || process.cwd() || os.homedir();
+  return process.env.AIBROWSER_ROOT || process.cwd() || os.homedir();
 }
 
 module.exports = { FileService, mimeFor, MAX_READ_BYTES, defaultRoot, IGNORED_DIRS };

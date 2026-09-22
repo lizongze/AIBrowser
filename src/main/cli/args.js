@@ -73,7 +73,7 @@ function stripElectronArgv(argv) {
   return args.slice(1);
 }
 
-const HELP = `Preview Studio (pvs) — Chromium 网页预览 + 代码高亮预览，AI 可调用
+const HELP = `AIBrowser (pvs) — Chromium 网页预览 + 代码高亮预览，AI 可调用
 
 用法:
   pvs open <file|url> [--root dir] [--new] [--json]      打开网页预览（自动识别 HTML / 目录 / URL）
@@ -100,9 +100,9 @@ const HELP = `Preview Studio (pvs) — Chromium 网页预览 + 代码高亮预�
   --quiet       静默模式，只输出结果
 
 环境变量:
-  PREVIEW_STUDIO_RUNTIME   控制通道目录（默认 $XDG_RUNTIME_DIR/preview-studio）
-  PREVIEW_STUDIO_PORT      固定控制端口
-  PREVIEW_STUDIO_TOKEN     固定控制令牌
+  AIBROWSER_RUNTIME   控制通道目录（默认 $XDG_RUNTIME_DIR/aibrowser）
+  AIBROWSER_PORT      固定控制端口
+  AIBROWSER_TOKEN     固定控制令牌
 `;
 
 module.exports = { parseArgs, stripElectronArgv, HELP, BOOLEAN_FLAGS, VALUE_FLAGS };

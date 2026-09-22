@@ -116,7 +116,7 @@ class PreviewSession {
         show: false,
         skipTaskbar: true,
         focusable: false,
-        title: 'Preview Studio',
+        title: 'AIBrowser',
         backgroundColor: '#ffffff',
         webPreferences: { ...webPreferences, offscreen: true },
       });
@@ -133,7 +133,7 @@ class PreviewSession {
         height: DEFAULT_HEIGHT,
         show: false,
         skipTaskbar: true,
-        title: 'Preview Studio',
+        title: 'AIBrowser',
         backgroundColor: '#ffffff',
         webPreferences,
       });

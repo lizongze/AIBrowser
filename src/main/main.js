@@ -16,24 +16,24 @@ const explicitScale = (() => {
   if (idx !== -1 && process.argv[idx + 1]) return Number(process.argv[idx + 1]);
   const inline = process.argv.find((arg) => arg.startsWith('--scale-factor='));
   if (inline) return Number(inline.split('=')[1]);
-  if (process.env.PREVIEW_STUDIO_SCALE) return Number(process.env.PREVIEW_STUDIO_SCALE);
+  if (process.env.AIBROWSER_SCALE) return Number(process.env.AIBROWSER_SCALE);
   return null;
 })();
 const scaleInfo = detectScaleFactor(explicitScale);
 const wslgScale = scaleInfo.scale ? null : wslgRecommendedScale();
 if (scaleInfo.scale) {
-  // 显式指定（--scale-factor / PREVIEW_STUDIO_SCALE）永远优先
+  // 显式指定（--scale-factor / AIBROWSER_SCALE）永远优先
   app.commandLine.appendSwitch('force-device-scale-factor', String(scaleInfo.scale));
-  process.stderr.write(`[preview-studio] 渲染缩放 ${scaleInfo.scale}x（来源：${scaleInfo.source}${scaleInfo.detail ? ' · ' + scaleInfo.detail : ''}）\n`);
+  process.stderr.write(`[aibrowser] 渲染缩放 ${scaleInfo.scale}x（来源：${scaleInfo.source}${scaleInfo.detail ? ' · ' + scaleInfo.detail : ''}）\n`);
 } else if (wslgScale) {
   // WSLg 把 devicePixelRatio 报成 2.25（实测），远大于 Windows 桌面的实际缩放，
   // 于是面板文字显得又小又虚。这里默认纠正到 1.25x（可用 --scale-factor 覆盖，
-  // 或设 PREVIEW_STUDIO_WSLG_SCALE=0 关掉）。
+  // 或设 AIBROWSER_WSLG_SCALE=0 关掉）。
   app.commandLine.appendSwitch('force-device-scale-factor', String(wslgScale));
-  process.stderr.write(`[preview-studio] 渲染缩放 ${wslgScale}x（WSLg 默认纠正，--scale-factor 可覆盖）\n`);
+  process.stderr.write(`[aibrowser] 渲染缩放 ${wslgScale}x（WSLg 默认纠正，--scale-factor 可覆盖）\n`);
 } else {
   process.stderr.write(
-    `[preview-studio] 渲染缩放：系统默认${scaleInfo.detail ? `（探测参考 ${scaleInfo.detail}）` : ''}`
+    `[aibrowser] 渲染缩放：系统默认${scaleInfo.detail ? `（探测参考 ${scaleInfo.detail}）` : ''}`
     + '；觉得字小可用 --scale-factor 1.25/1.5\n',
   );
 }
@@ -61,7 +61,7 @@ registerScheme();
 
 const cli = parseArgs(stripElectronArgv(process.argv));
 const flags = cli.flags;
-const isHeadless = Boolean(flags.headless) || process.env.PREVIEW_STUDIO_HEADLESS === '1';
+const isHeadless = Boolean(flags.headless) || process.env.AIBROWSER_HEADLESS === '1';
 const smokeTest = Boolean(flags['smoke-test']);
 
 const files = new FileService();
@@ -105,7 +105,7 @@ function createWindow() {
     minHeight: 560,
     show: false,
     backgroundColor: '#ffffff', // 默认白天模式
-    title: 'Preview Studio',
+    title: 'AIBrowser',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -124,7 +124,7 @@ function createWindow() {
       <body style="background:#0d1117;color:#c9d1d9;font:14px ui-monospace,monospace;padding:40px">
       <h2 style="color:#f85149">渲染层未构建</h2>
       <p>请先执行：<code style="background:#161b22;padding:2px 6px;border-radius:4px">npm run build</code></p>
-      <p style="color:#8b949e">然后重新启动 Preview Studio。</p></body>`));
+      <p style="color:#8b949e">然后重新启动 AIBrowser。</p></body>`));
     return win;
   }
   // 恢复上次的界面缩放
@@ -143,7 +143,7 @@ function createWindow() {
   win.once('ready-to-show', () => {
     // 默认最大化全屏铺满可用区域（面板类工具的常态用法）；--no-maximize 可保持窗口大小
     if (!flags['no-maximize']) win.maximize();
-    process.stderr.write(`[preview-studio] 窗口内容尺寸 ${win.getContentSize().join('×')} · 渲染缩放 ${scaleInfo.scale || '系统默认'}
+    process.stderr.write(`[aibrowser] 窗口内容尺寸 ${win.getContentSize().join('×')} · 渲染缩放 ${scaleInfo.scale || '系统默认'}
 `);
     win.show();
     state.ready = true;
@@ -172,7 +172,7 @@ function registerIpc() {
   const manager = () => state.manager;
 
   handle('ui:ready', async () => {
-    process.stderr.write('[preview-studio] 渲染层就绪，补发排队请求 ' + state.pendingRequests.length + ' 条\n');
+    process.stderr.write('[aibrowser] 渲染层就绪，补发排队请求 ' + state.pendingRequests.length + ' 条\n');
     // 面板就绪：处理此前排队的控制请求
     state.rendererReady = true;
     const pending = state.pendingRequests.splice(0, state.pendingRequests.length);
@@ -286,7 +286,7 @@ function registerIpc() {
       : Math.min(Math.max(current + (payload.delta || 0), 0.6), 3);
     win.webContents.setZoomFactor(next);
     const saved = config.write({ uiScale: next });
-    process.stderr.write(`[preview-studio] 界面缩放 ${Math.round(next * 100)}%\n`);
+    process.stderr.write(`[aibrowser] 界面缩放 ${Math.round(next * 100)}%\n`);
     return { factor: next, saved: saved.uiScale };
   });
 
@@ -403,7 +403,7 @@ async function bootstrap() {
   if (initialRoot && fs.existsSync(initialRoot)) files.addRoot(initialRoot);
   if (!files.listRoots().length && flags.cwd !== false) {
     // 默认把「当前工作目录」作为根目录，方便直接浏览
-    const cwd = process.env.PREVIEW_STUDIO_CWD || process.cwd();
+    const cwd = process.env.AIBROWSER_CWD || process.cwd();
     if (fs.existsSync(cwd)) files.addRoot(cwd);
   }
 
@@ -420,7 +420,7 @@ async function bootstrap() {
       // 面板还没就绪时，把「打开会话」类事件排队，就绪后补发，避免界面漏渲染
       if (channel === 'ui:open' && !state.rendererReady && state.window && !state.window.isDestroyed()) {
         state.pendingRequests.push(payload);
-        process.stderr.write('[preview-studio] ui:open 排队（面板未就绪）\n');
+        process.stderr.write('[aibrowser] ui:open 排队（面板未就绪）\n');
         return;
       }
       broadcast(channel, payload);
@@ -443,7 +443,7 @@ async function bootstrap() {
   }
 
   // 守护进程把连接信息打到 stderr，便于脚本读取
-  process.stderr.write(`[preview-studio] ${state.mode} · pid ${process.pid} · http://127.0.0.1:${state.server.port} · socket ${state.server.state.socket}\n`);
+  process.stderr.write(`[aibrowser] ${state.mode} · pid ${process.pid} · http://127.0.0.1:${state.server.port} · socket ${state.server.state.socket}\n`);
 
   if (smokeTest) {
     const code = await runSmokeTest({ manager: state.manager, files, server: state.server, app });
@@ -456,7 +456,7 @@ async function bootstrap() {
   const urlFlag = flags.url;
   if (urlFlag) {
     await state.manager.open({ url: String(urlFlag), focus: true }).catch((err) => {
-      process.stderr.write(`[preview-studio] 打开 URL 失败：${err.message}\n`);
+      process.stderr.write(`[aibrowser] 打开 URL 失败：${err.message}\n`);
     });
   }
   for (const target of targets) {
@@ -466,7 +466,7 @@ async function bootstrap() {
       if (flags.mode === 'code') await state.manager.openCode({ file: abs });
       else await state.manager.openPath(abs);
     } catch (err) {
-      process.stderr.write(`[preview-studio] 打开 ${abs} 失败：${err.message}\n`);
+      process.stderr.write(`[aibrowser] 打开 ${abs} 失败：${err.message}\n`);
     }
   }
 }
@@ -524,6 +524,6 @@ process.on('SIGTERM', () => gracefulQuit());
 process.on('SIGINT', () => gracefulQuit());
 
 app.whenReady().then(bootstrap).catch((err) => {
-  process.stderr.write(`[preview-studio] 启动失败：${err && err.stack ? err.stack : err}\n`);
+  process.stderr.write(`[aibrowser] 启动失败：${err && err.stack ? err.stack : err}\n`);
   app.exit(1);
 });

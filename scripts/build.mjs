@@ -1,4 +1,4 @@
-// Preview Studio — build script
+// AIBrowser — build script
 // 用 esbuild 打包渲染进程（CodeMirror 需要打包），并把静态资源拷到 dist/
 import { build, context } from 'esbuild';
 import { cp, mkdir, rm } from 'node:fs/promises';

@@ -1,6 +1,6 @@
 {
-  "name": "preview-studio",
-  "productName": "Preview Studio",
+  "name": "aibrowser",
+  "productName": "AIBrowser",
   "version": "0.1.0",
   "private": true,
   "description": "基于 Chromium 内核的网页预览 + 代码高亮预览工具（AI 可调用）",

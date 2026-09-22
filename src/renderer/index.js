@@ -1,4 +1,4 @@
-// Preview Studio 渲染层：面板 UI（文件树 / 标签 / CodeMirror / 控制台 / 原生视图联动）
+// AIBrowser 渲染层：面板 UI（文件树 / 标签 / CodeMirror / 控制台 / 原生视图联动）
 import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
@@ -311,7 +311,15 @@ function baseExtensions() {
     keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
     EditorView.theme({
       '&': { height: '100%', fontSize: 'var(--editor-font-size, 13px)', backgroundColor: 'transparent' },
-      '.cm-scroller': { fontFamily: 'var(--mono)', fontSize: 'inherit', lineHeight: '1.7', letterSpacing: '0.1px' },
+      '.cm-scroller': {
+        fontFamily: 'var(--mono)',
+        fontSize: 'inherit',
+        lineHeight: '1.7',
+        letterSpacing: '0.1px',
+        // Cascadia Code 的编程连字（=> != >= :: 等），代码可读性更好
+        fontVariantLigatures: 'contextual',
+        fontFeatureSettings: '"calt" 1, "liga" 1',
+      },
       '.cm-gutters': { backgroundColor: 'var(--bg)', borderRight: '1px solid var(--border)', color: 'var(--faint)' },
       '.cm-activeLine': { backgroundColor: 'rgba(76,141,255,0.06)' },
       '.cm-activeLineGutter': { backgroundColor: 'rgba(76,141,255,0.08)' },
@@ -1315,6 +1323,25 @@ window.__PVS_ACTION__ = (action, payload = {}) => {
     case 'toggle-console': toggleConsole(); return { view: state.view };
     case 'content-only': toggleContentOnly(payload.visible); return { contentOnly: state.contentOnly };
     case 'ui-zoom': applyUiScale(payload.factor, { persist: false }); return { uiScale: state.uiScale };
+    case 'font-report': {
+      // 报告各区域实际使用的字体与字号（便于确认字体栈是否命中）
+      const pick = (sel) => {
+        const node = document.querySelector(sel);
+        if (!node) return null;
+        const cs = getComputedStyle(node);
+        return { family: cs.fontFamily.split(',')[0].replace(/["']/g, ''), size: cs.fontSize, ligatures: cs.fontVariantLigatures };
+      };
+      return {
+        editor: pick('.cm-scroller'),
+        editorContent: pick('.cm-content'),
+        codeHead: pick('#code-name'),
+        address: pick('#address'),
+        console: pick('#console-list'),
+        tree: pick('#tree'),
+        title: pick('.app-name'),
+        hint: pick('.empty-sub'),
+      };
+    }
     case 'idle-stats': return {
       // 布局上报累计次数：静置时应停止增长（持续增长说明存在重排循环）
       layoutSends: state.layoutSendCount || 0,

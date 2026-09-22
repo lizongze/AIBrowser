@@ -8,12 +8,26 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 
+/**
+ * 读取环境变量，同时兼容旧前缀。
+ * 改名（Preview Studio → AIBrowser）不应破坏已有脚本，因此 AIBROWSER_* 优先，
+ * 回退到 PREVIEW_STUDIO_*（旧名），最后才是默认值。
+ */
+function env(name, fallback) {
+  const next = process.env[`AIBROWSER_${name}`];
+  if (next !== undefined) return next;
+  const legacy = process.env[`PREVIEW_STUDIO_${name}`];
+  if (legacy !== undefined) return legacy;
+  return fallback;
+}
+
 function runtimeDir() {
-  if (process.env.PREVIEW_STUDIO_RUNTIME) return process.env.PREVIEW_STUDIO_RUNTIME;
+  const configured = env('RUNTIME');
+  if (configured) return configured;
   if (process.platform === 'linux' && process.env.XDG_RUNTIME_DIR) {
-    return path.join(process.env.XDG_RUNTIME_DIR, 'preview-studio');
+    return path.join(process.env.XDG_RUNTIME_DIR, 'aibrowser');
   }
-  return path.join(os.homedir(), '.preview-studio');
+  return path.join(os.homedir(), '.aibrowser');
 }
 
 function statePath() {
@@ -208,6 +222,7 @@ async function bindSocket(onRequest, { reclaim = true, adopt = true } = {}) {
 }
 
 module.exports = {
+  env,
   runtimeDir,
   statePath,
   socketPath,

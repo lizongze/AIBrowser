@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================================
-REM  Preview Studio —— 在 Windows 原生运行（推荐）
+REM  AIBrowser —— 在 Windows 原生运行（推荐）
 REM
 REM  为什么推荐：WSL 里的图形窗口要经过 WSLg 的远程呈现层（RDP/Weston）送到
 REM  笔记本屏幕，最终按屏幕比例缩放后才显示，字号与笔画会被重采样，观感明显
@@ -45,6 +45,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo 启动 Preview Studio（关闭本窗口即可退出）
+echo 启动 AIBrowser（关闭本窗口即可退出）
 call npx electron . %*
 endlocal

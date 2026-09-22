@@ -140,7 +140,7 @@ function injectIntoHtml(html, ctx, baseHref) {
 }
 
 function errorPage(status, message, detail) {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview Studio · ${status}</title>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>AIBrowser · ${status}</title>
 <style>
  body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#0d1117;color:#c9d1d9;
       font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}

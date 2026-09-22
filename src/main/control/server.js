@@ -9,7 +9,7 @@ const fsp = require('node:fs/promises');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { bindSocket, runtimeDir, socketPath, writeState } = require('./state');
+const { bindSocket, runtimeDir, socketPath, writeState, env } = require('./state');
 
 const VERSION = require('../../../package.json').version;
 const MAX_BODY = 8 * 1024 * 1024;
@@ -101,7 +101,7 @@ class ControlServer {
     this.broadcast = deps.broadcast || (() => {});
     this.requestShutdown = deps.requestShutdown || (() => {});
     this.mode = deps.mode;
-    this.token = process.env.PREVIEW_STUDIO_TOKEN || crypto.randomBytes(16).toString('hex');
+    this.token = env('TOKEN') || crypto.randomBytes(16).toString('hex');
     this.port = null;
     this.server = null;
     this.socketServer = null;
@@ -118,7 +118,7 @@ class ControlServer {
   }
 
   async start({ port } = {}) {
-    const desired = Number(port || process.env.PREVIEW_STUDIO_PORT || 0);
+    const desired = Number(port || env('PORT') || 0);
     this.server = http.createServer((req, res) => this.handleHttp(req, res));
     this.server.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head));
     await new Promise((resolve, reject) => {

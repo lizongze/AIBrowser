@@ -310,7 +310,7 @@ async function commandServe(_args, flags) {
   const child = spawn(ELECTRON_BIN, [projectRoot(), ...(wantGui ? [] : ['--headless']), ...(flags.port ? ['--port', String(flags.port)] : [])], {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, ...(wantGui ? {} : { PREVIEW_STUDIO_HEADLESS: '1' }) },
+    env: { ...process.env, ...(wantGui ? {} : { AIBROWSER_HEADLESS: '1' }) },
   });
   child.unref();
   const ready = await waitForReady({ timeoutMs: wantGui ? 30000 : 25000, startedAt });

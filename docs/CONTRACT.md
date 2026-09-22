@@ -1,4 +1,4 @@
-# Preview Studio — 架构与接口契约（v0.1，实现以此为准）
+# AIBrowser — 架构与接口契约（v0.1，实现以此为准）
 
 一个 **Electron（Chromium 内核）预览工具**：`GUI 面板` + `无头渲染守护进程` + `本地控制 API / CLI`（给 AI 与脚本调用）。
 所有能力（开网页、开代码、截图、取 DOM 文本、执行 JS、读控制台）在 GUI 与无头模式下**完全一致**。
@@ -11,11 +11,11 @@
 - 首个进程绑定 socket；后到进程如果发现 socket 已被占用，仍会写自己的 `state.json`（后来者覆盖），从而「接管」控制入口；旧进程保留自己的会话。
 - 每个进程把 `state.json` 写成：
   ```json
-  { "pid": 1234, "port": 7411, "socket": "/run/user/1000/preview-studio/control.sock",
+  { "pid": 1234, "port": 7411, "socket": "/run/user/1000/aibrowser/control.sock",
     "token": "…", "mode": "gui" | "daemon", "startedAt": 1700000000000 }
   ```
-- `<runtimeDir>`：`process.env.PREVIEW_STUDIO_RUNTIME` > Linux 下 `$XDG_RUNTIME_DIR/preview-studio` > `~/.preview-studio`。
-- 端口默认取空闲端口；可用 `PREVIEW_STUDIO_PORT` 固定，或 `--port` 指定。
+- `<runtimeDir>`：`process.env.AIBROWSER_RUNTIME` > Linux 下 `$XDG_RUNTIME_DIR/aibrowser` > `~/.aibrowser`。
+- 端口默认取空闲端口；可用 `AIBROWSER_PORT` 固定，或 `--port` 指定。
 
 ## 2. 模块
 
@@ -171,7 +171,7 @@ pvs status [--json]                       # 输出 state.json 摘要 + health
 - 目标进程选择：默认「**连通优先**」——读 `state.json`，探活成功就用它（GUI 或 daemon 皆可）；探活失败则 `spawn` 一个 detach 的无头 daemon，等就绪后执行。
 - `--daemon`：强制忽略现有 GUI，另起无头会话；`--gui`：强制在 GUI 里操作（无 GUI 则启动 GUI）。
 - 输出：默认人类可读（含 `sessionId`、URL、尺寸）；`--json` 输出**单行 JSON**（stdout 干净，日志走 stderr），退出码 `0` 成功 / `1` 失败 / `2` 用法错误。
-- 环境变量：`PREVIEW_STUDIO_RUNTIME`、`PREVIEW_STUDIO_PORT`、`PREVIEW_STUDIO_TOKEN`、`PREVIEW_STUDIO_NO_SPAWN=1`（禁止自动拉起进程）。
+- 环境变量：`AIBROWSER_RUNTIME`、`AIBROWSER_PORT`、`AIBROWSER_TOKEN`、`AIBROWSER_NO_SPAWN=1`（禁止自动拉起进程）。
 
 ## 7.4 字体渲染
 
@@ -183,7 +183,7 @@ CSS 侧不设 `-webkit-font-smoothing`，使用 `text-rendering: geometricPrecis
 
 WSLg 下 Chromium 报告的 devicePixelRatio（2.25）大于 Windows 桌面缩放（常见 150%），
 `src/main/display-scale.js` 提供观测与建议值，主进程默认套用 **1.5x**；
-`--scale-factor` / `PREVIEW_STUDIO_SCALE` 显式覆盖，`PREVIEW_STUDIO_WSLG_SCALE=0` 关闭。
+`--scale-factor` / `AIBROWSER_SCALE` 显式覆盖，`AIBROWSER_WSLG_SCALE=0` 关闭。
 截图（`capturePage`）输出的是物理像素 = 逻辑尺寸 × 缩放系数。
 
 ## 8. 无头渲染与截图

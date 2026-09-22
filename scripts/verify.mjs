@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeDir = process.env.XDG_RUNTIME_DIR
-  ? path.join(process.env.XDG_RUNTIME_DIR, 'preview-studio')
-  : path.join(process.env.HOME, '.preview-studio');
+  ? path.join(process.env.XDG_RUNTIME_DIR, 'aibrowser')
+  : path.join(process.env.HOME, '.aibrowser');
 const statePath = path.join(runtimeDir, 'state.json');
 
 const results = [];
@@ -73,7 +73,7 @@ async function waitFor(check, { timeoutMs = 8000, intervalMs = 300, label = '条
 }
 
 async function main() {
-  console.log('Preview Studio 端到端验收\n');
+  console.log('AIBrowser 端到端验收\n');
   try { fs.writeFileSync('/tmp/pvs-verify-gui.log', ''); } catch { /* ignore */ }
   spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'stop'], { stdio: 'ignore' });
   await sleep(1200);
@@ -116,9 +116,9 @@ async function main() {
   const evaluated = await api('eval', { expression: '({ cards: document.querySelectorAll(".card").length, title: document.title })' });
   const value = JSON.parse(evaluated.value);
   check(value.cards === 3, 'Chromium 渲染出页面结构', `${value.cards} 张卡片`);
-  check(value.title.includes('Preview Studio'), '页面标题正确', value.title);
+  check(value.title.includes('AIBrowser'), '页面标题正确', value.title);
 
-  const shot = await api('screenshot', { format: 'png', out: path.join(root, '.preview-studio', 'verify-shot.png') });
+  const shot = await api('screenshot', { format: 'png', out: path.join(root, '.aibrowser', 'verify-shot.png') });
   check(shot.bytes > 2000, '无头截图可用', `${shot.width}×${shot.height} · ${Math.round(shot.bytes / 1024)}KB`);
 
   const logs = await api('console');

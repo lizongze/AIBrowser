@@ -7,6 +7,7 @@
 // 这里把 Windows 的真实缩放比例算出来，交给 Chromium 的 force-device-scale-factor，
 // 让面板与 Windows 原生应用保持一致的物理字号。
 const { execFileSync } = require('node:child_process');
+const { env } = require('./control/state');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -105,8 +106,9 @@ function detectScaleFactor(explicit = null) {
   if (explicit && Number.isFinite(explicit) && explicit > 0) {
     return { scale: explicit, source: 'explicit' };
   }
-  if (process.env.PREVIEW_STUDIO_SCALE) {
-    const value = Number(process.env.PREVIEW_STUDIO_SCALE);
+  const configured = env('SCALE');
+  if (configured) {
+    const value = Number(configured);
     if (Number.isFinite(value) && value > 0) return { scale: value, source: 'env' };
   }
   if (!isWsl()) return { scale: null, source: 'native' };
@@ -128,9 +130,10 @@ function detectScaleFactor(explicit = null) {
  * 用 1.25 则还需要额外的 1.2 倍小数重采样，笔画会发虚。
  */
 function wslgRecommendedScale() {
-  if (process.env.PREVIEW_STUDIO_WSLG_SCALE === '0') return null;
-  if (process.env.PREVIEW_STUDIO_WSLG_SCALE) {
-    const value = Number(process.env.PREVIEW_STUDIO_WSLG_SCALE);
+  const configured = env('WSLG_SCALE');
+  if (configured === '0') return null;
+  if (configured) {
+    const value = Number(configured);
     if (Number.isFinite(value) && value > 0) return value;
   }
   return isWsl() ? 1.5 : null;

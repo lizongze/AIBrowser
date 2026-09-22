@@ -4,7 +4,7 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
-const { readState, probe, pidAlive, runtimeDir } = require('../control/state');
+const { readState, probe, pidAlive, runtimeDir, env } = require('../control/state');
 
 const ELECTRON_BIN = require('electron');
 
@@ -139,7 +139,7 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   const child = spawn(ELECTRON_BIN, args, {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, PREVIEW_STUDIO_HEADLESS: '1' },
+    env: { ...process.env, AIBROWSER_HEADLESS: '1' },
   });
   child.unref();
   if (!quiet) process.stderr.write(`[pvs] 启动${headless ? '无头预览服务' : '预览面板'}（pid ${child.pid}）…\n`);

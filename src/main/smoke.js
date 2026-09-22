@@ -17,14 +17,14 @@ async function runSmokeTest({ manager, files, server, app }) {
     log(ok, message, extra);
   };
 
-  process.stdout.write('\nPreview Studio 自检\n');
+  process.stdout.write('\nAIBrowser 自检\n');
 
   // 准备临时示例页面
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pvs-smoke-'));
   const page = path.join(dir, 'index.html');
   fs.writeFileSync(page, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Smoke</title></head>
 <body style="background:#0d1117;color:#e6edf3;font:16px system-ui;padding:24px">
-<h1 id="title">Preview Studio Smoke</h1>
+<h1 id="title">AIBrowser Smoke</h1>
 <div id="box" style="width:120px;height:60px;background:#4c8dff;border-radius:8px"></div>
 <script>console.log('smoke-ready', 6 * 7); window.__VALUE__ = { ok: true, n: 42 };</script>
 </body></html>`);
@@ -47,7 +47,7 @@ async function runSmokeTest({ manager, files, server, app }) {
   // 3. 渲染结果
   try {
     const content = await session.getContent({});
-    check(content.text.includes('Preview Studio Smoke'), '读取渲染后的文本', `${content.length} 字符`);
+    check(content.text.includes('AIBrowser Smoke'), '读取渲染后的文本', `${content.length} 字符`);
   } catch (err) {
     check(false, '读取渲染后的文本', err.message);
   }

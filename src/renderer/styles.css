@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Preview Studio — 唯一样式表
+   AIBrowser — 唯一样式表
    面板式桌面工具风格：紧凑、低饱和、1px 分隔线、等宽字体、高信息密度。
    约定：
      · 所有面板圆角为 0，仅 chip / 按钮 / toast 使用 4–6px 小圆角
@@ -37,9 +37,11 @@
   --purple: #a371f7;
 
   /* 字体与尺寸 */
-  --mono: ui-monospace, "SFMono-Regular", "SF Mono", "JetBrains Mono", "Cascadia Mono",
-    "Ubuntu Sans Mono", "Ubuntu Mono", "Noto Sans Mono", "DejaVu Sans Mono", Menlo,
-    Consolas, "Liberation Mono", monospace;
+  /* 代码用专业编程等宽字体：Cascadia Code（微软开源，字形现代、连字完整）优先，
+     Windows 侧天然命中，Linux/WSL 装到用户字体目录也能命中；再退到 Consolas / SF Mono / Menlo。 */
+  --mono: "Cascadia Code", "Cascadia Mono", "JetBrains Mono", "SF Mono", SFMono-Regular, Menlo,
+    Consolas, "Ubuntu Sans Mono", "Ubuntu Mono", "Noto Sans Mono", "DejaVu Sans Mono",
+    "Liberation Mono", ui-monospace, monospace;
   /* 中文优先微软雅黑/苹方等高质量字体（笔画饱满、小字号不发虚）；
      Linux 侧若装过 Windows 字体或 Noto CJK，都能命中，否则退到文泉驿。 */
   --ui: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
