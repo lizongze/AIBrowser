@@ -11,6 +11,7 @@ const $ = (id) => document.getElementById(id);
 const el = {
   body: document.body,
   rootChip: $('root-chip'),
+  rootBar: $('root-bar'),
   rootLabel: $('root-label'),
   statusText: $('status-text'),
   statusDot: $('status-dot'),
@@ -62,6 +63,9 @@ const state = {
   entries: [], // 当前根目录条目
   treeCache: new Map(),
   expanded: new Set(),
+  // 文件树当前展示哪个根目录。必须显式记住：打开文件时主进程会把文件所在目录也注册成
+  // 根目录，如果跟着「最后新增的根目录」走，展开子目录点一下文件，父级目录就没了。
+  treeRootDir: null,
   sessions: [],
   activeId: null,
   drafts: [], // 新建但还没绑定文件的空标签：{ id, active }
@@ -785,10 +789,53 @@ async function refreshSessions() {
 
 // ---------------------------------------------------------------- 文件树
 
+/**
+ * 文件树该以哪个根目录为根：
+ *   1) 用户显式切换过的那个（state.treeRootDir）
+ *   2) 否则取最外层（路径最短）的根目录 —— 也就是项目根
+ * 绝不取「最后新增的根目录」：那是打开文件时自动注册的子目录。
+ */
+function treeRoot() {
+  const roots = state.roots || [];
+  if (!roots.length) return null;
+  const chosen = roots.find((item) => item.dir === state.treeRootDir);
+  if (chosen) return chosen;
+  return roots.slice().sort((a, b) => a.dir.length - b.dir.length)[0];
+}
+
 function renderRoots() {
-  const root = state.roots[state.roots.length - 1];
+  const root = treeRoot();
   el.rootLabel.textContent = root ? basename(root.dir) || root.dir : '未打开文件夹';
-  el.rootChip.title = root ? root.dir : '点击选择项目目录';
+  el.rootChip.title = root ? `${root.dir}\n点击选择项目目录` : '点击选择项目目录';
+  renderRootBar(root);
+}
+
+/** 根目录切换栏：多根目录时才出现，点一下就切文件树的根 */
+function renderRootBar(current) {
+  const bar = el.rootBar;
+  const roots = (state.roots || []).slice().sort((a, b) => a.dir.length - b.dir.length);
+  if (roots.length <= 1) {
+    bar.hidden = true;
+    bar.innerHTML = '';
+    return;
+  }
+  bar.hidden = false;
+  bar.innerHTML = '';
+  for (const item of roots) {
+    const chip = document.createElement('button');
+    chip.className = 'root-pill';
+    chip.classList.toggle('on', Boolean(current) && item.dir === current.dir);
+    chip.textContent = basename(item.dir) || item.dir;
+    chip.title = item.dir;
+    chip.addEventListener('click', () => {
+      state.treeRootDir = item.dir;
+      state.treeCache.clear();
+      renderRoots();
+      renderTree().catch(() => {});
+      setStatus(`文件树根目录：${item.dir}`, 'info');
+    });
+    bar.appendChild(chip);
+  }
 }
 
 async function loadTree(dir) {
@@ -798,7 +845,7 @@ async function loadTree(dir) {
 }
 
 async function renderTree() {
-  const root = state.roots[state.roots.length - 1];
+  const root = treeRoot();
   el.tree.innerHTML = '';
   if (!root) {
     el.tree.innerHTML = '<div class="node" style="opacity:.6;padding:10px;white-space:pre-line">尚未打开项目目录\n点击左上角目录名或 📂 选择</div>';
@@ -1287,11 +1334,12 @@ function setSidebar(visible, { notify = true } = {}) {
 
 async function pickFolder() {
   try {
-    const result = await window.api.files.openFolder({ defaultPath: state.roots[state.roots.length - 1]?.dir });
+    const result = await window.api.files.openFolder({ defaultPath: treeRoot()?.dir });
     if (!result) return;
     state.treeCache.clear();
     state.expanded.clear();
     state.roots = (await window.api.files.roots()).roots;
+    state.treeRootDir = result.root || null; // 用户选的目录就是要看的目录
     renderRoots();
     await renderTree();
     setStatus(`已打开目录 ${basename(result.root)}`, 'ok');
@@ -1323,6 +1371,8 @@ function wireEventsFromMain() {
   });
   window.api.on('roots:updated', (payload) => {
     state.roots = payload.roots || [];
+    // 只有当前树根目录没了才回退到最外层，别被新注册的子目录牵着走
+    if (state.treeRootDir && !state.roots.some((item) => item.dir === state.treeRootDir)) state.treeRootDir = null;
     if (state.activeFile) {
       el.codePath.title = state.activeFile;
       fitPath(el.codePath, displayPath(state.activeFile));
@@ -1410,6 +1460,16 @@ window.__PVS_ACTION__ = (action, payload = {}) => {
     case 'activate': activateSession(payload.sessionId); return { activeId: state.activeId };
     case 'close-tab': closeSession(payload.sessionId || state.activeId); return { closing: true };
     case 'sidebar-tab': setSideTab(payload.tab); return { side: payload.tab };
+    case 'set-tree-root': {
+      // 等价于点侧栏的根目录切换：把文件树的根换成指定目录
+      const dir = String(payload.dir || '');
+      if (!state.roots.some((item) => item.dir === dir)) return { error: 'unknown root', roots: state.roots.map((r) => r.dir) };
+      state.treeRootDir = dir;
+      state.treeCache.clear();
+      renderRoots();
+      renderTree().catch(() => {});
+      return { treeRoot: dir };
+    }
     case 'open-tree': {
       // 等价于「鼠标点文件树里的某个文件」，用于还原用户手工操作路径
       const nodes = [...document.querySelectorAll('#tree .node')];
@@ -1569,6 +1629,8 @@ window.__PVS_PANEL__ = () => {
     tabs: [...document.querySelectorAll('#tabs .tab')].map((tab) => tab.textContent.trim()),
     sessions: state.sessions.map((session) => ({ id: session.sessionId, kind: session.kind, file: session.file, title: session.title })),
     roots: state.roots,
+    treeRoot: treeRoot()?.dir || null,
+    treeRows: document.querySelectorAll('#tree .node').length,
     codeSessions: [...state.codeSessions.entries()].map(([id, meta]) => ({ id, file: meta.file, chars: meta.text ? meta.text.length : 0 })),
     logs: state.logs.slice(-8).map((entry) => `${entry.level}: ${entry.text.slice(0, 120)}`),
     viewTrace: (state.viewTrace || []).slice(-12),

@@ -610,6 +610,38 @@ body.resizing {
   padding: 4px 0;
 }
 
+/* 根目录切换：多根目录时出现（打开文件会顺带注册它的目录，需要一个切回去的入口） */
+.root-bar {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+  align-items: center;
+  overflow-x: auto;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  scrollbar-width: thin;
+}
+
+.root-pill {
+  flex: 0 0 auto;
+  max-width: 132px;
+  overflow: hidden;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--faint);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.root-pill:hover { color: var(--fg); border-color: var(--accent); }
+.root-pill.on { color: var(--accent); border-color: var(--accent); }
+
 .side-foot {
   display: flex;
   align-items: center;

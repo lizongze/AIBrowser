@@ -218,6 +218,35 @@ async function main() {
   check(treeEditor.editor.docChars > 100, '点击文件树后编辑器装载了内容', `${treeEditor.editor.docChars} 字符 / ${treeEditor.editor.docLines} 行`);
   check(treeEditor.editor.renderedLines > 5, '点击文件树后内容真的渲染出来', `${treeEditor.editor.renderedLines} 行`);
 
+  // 文件树的根目录必须稳定：展开子目录、点开里面的文件、或子目录被注册成根目录，
+  // 都不该让树「跑到子目录里去」（父级消失、回不去 —— 曾经的 bug）
+  const examplesDir = path.join(root, 'examples');
+  const treeBefore = await api('panelState');
+  await api('roots', { root: examplesDir }); // 等价于「打开项目外的文件时自动注册它的目录」
+  await sleep(500);
+  const treeAfterRoot = await api('panelState');
+  check(
+    treeAfterRoot.state.treeRoot === treeBefore.state.treeRoot && treeAfterRoot.state.treeRows === treeBefore.state.treeRows,
+    '新增根目录不会让文件树跑到子目录里',
+    `树根 ${path.basename(treeAfterRoot.state.treeRoot || '')} · ${treeBefore.state.treeRows} → ${treeAfterRoot.state.treeRows} 行`,
+  );
+  const toExample = await api('panelAction', { action: 'set-tree-root', payload: { dir: examplesDir } });
+  await sleep(500);
+  const treeAtExample = await api('panelState');
+  check(
+    toExample.result?.treeRoot === examplesDir && treeAtExample.state.treeRows > 0 && treeAtExample.state.treeRows < treeBefore.state.treeRows,
+    '可以在根目录之间切换文件树',
+    `树根 examples · ${treeAtExample.state.treeRows} 行`,
+  );
+  await api('panelAction', { action: 'set-tree-root', payload: { dir: root } });
+  await sleep(500);
+  const treeBack = await api('panelState');
+  check(
+    treeBack.state.treeRoot === treeBefore.state.treeRoot && treeBack.state.treeRows === treeBefore.state.treeRows,
+    '能从子目录根切回项目根',
+    `${treeBack.state.treeRows} 行`,
+  );
+
   // 同一个文件树里切换到另一个文件，内容要跟着换
   await api('panelAction', { action: 'open-tree', payload: { name: 'package.json' } });
   await sleep(2000);
