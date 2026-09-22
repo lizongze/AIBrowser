@@ -488,6 +488,8 @@ async function bootstrap() {
     registerIpc();
     buildMenu();
     createWindow();
+    // 建完面板立刻预热一个渲染进程，降低首次新建标签页的延迟
+    setTimeout(() => state.manager.prewarm?.(), 300);
   }
 
   // 守护进程把连接信息打到 stderr，便于脚本读取
