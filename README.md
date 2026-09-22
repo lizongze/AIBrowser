@@ -42,6 +42,35 @@ npm start            # 启动面板（默认最大化）
 
 首次运行会自动把**当前工作目录**作为项目根目录：文件树里点 `.html`/`.svg` 进网页预览，点其它文件进代码预览。
 
+## 作为 Skill 给其它 Agent 调用
+
+`skills/aibrowser/` 是一份**可分发的 Agent Skill**（标准结构：`SKILL.md` + `scripts/` + `references/`），
+让其它 agent 能直接获得「打开网页/代码 → 取渲染结果 → 执行 JS → 截图 → 读报错」的能力。
+
+```bash
+bash skills/aibrowser/install.sh          # 安装到本机 skill 目录（符号链接，仓库更新即同步）
+bash skills/aibrowser/scripts/ensure-service.sh   # 确保后台服务就绪（幂等）
+```
+
+其它 agent 侧只需要 skill 目录，路径由 `scripts/resolve-home.sh` 自动解析：
+`$PVS_HOME` → 安装时记录的 `~/.aibrowser-skill.env` → 同仓库副本 → `PATH` 里的 `pvs`。
+
+```bash
+S=<skill目录>/scripts/pvs.sh
+$S open ./index.html --root . --json
+$S content --selector "#main" --json
+$S shot --out /tmp/page.png --full-page --json
+```
+
+| 文件 | 作用 |
+| --- | --- |
+| `SKILL.md` | 触发条件、命令速查、错误码处置（agent 读这一份就够） |
+| `scripts/pvs.sh` | CLI 包装：自动找到项目并把命令转交 `pvs` |
+| `scripts/ensure-service.sh` | 确保无头服务就绪（幂等，首次调用时自动拉起） |
+| `scripts/resolve-home.sh` | 路径解析（支持符号链接安装） |
+| `references/api.md` | HTTP API 与全部动作名（长驻服务场景更省开销） |
+| `install.sh` | 安装到 `~/.codex/skills`、`~/.codefree-cli/skills` 等已有目录 |
+
 ## GUI 快捷键
 
 | 快捷键 | 作用 |
@@ -150,6 +179,7 @@ src/main/
 src/renderer/               面板 UI（index.html / index.js / styles.css）
 scripts/                    构建、端到端验收、面板像素检查
 examples/                   示例页面（demo.html / font-compare.html）
+skills/aibrowser/           可分发的 Agent Skill（SKILL.md + scripts + references）
 docs/CONTRACT.md            架构与接口契约（含完整 API 表）
 docs/SKILL.md               给 AI Agent 的使用说明（可直接喂给模型）
 docs/NOTES.md               额外说明（显示质量 / 字体 / 缩放 / Windows 原生运行 / 容器兼容）
