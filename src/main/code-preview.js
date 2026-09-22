@@ -8,6 +8,21 @@ const path = require('node:path');
 const hljs = require('highlight.js');
 const { detectLanguage } = require('./language');
 
+/**
+ * 内联 highlight.js 官方主题（亮色 github / 暗色 github-dark）。
+ * 只输出 hljs-* 类名而不给样式，代码就是一片无色的黑字 —— 这是之前截图的真实问题。
+ */
+const HLJS_CSS = (() => {
+  const read = (name) => {
+    try {
+      return fs.readFileSync(path.join(require.resolve('highlight.js/package.json'), '..', 'styles', name), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  return { light: read('github.css'), dark: read('github-dark.css') };
+})();
+
 const MAX_BYTES = 2 * 1024 * 1024; // 超过这个大小不渲染（避免卡死）
 const CACHE_LIMIT = 24;
 
@@ -137,6 +152,8 @@ function decorate(body, { title, theme, wrap, meta }) {
   return `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(title || 'code')}</title>
 <style>
+  /* highlight.js 主题（内联，保证离线可用） */
+${HLJS_CSS[dark ? 'dark' : 'light']}
   :root { color-scheme: ${dark ? 'dark' : 'light'}; }
   * { box-sizing: border-box; }
   body {
