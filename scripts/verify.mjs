@@ -6,6 +6,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+// ESM 里没有 require：判断「真实 electron 二进制」路径时要用它（.bin/electron 是 node shim）
+const require = createRequire(import.meta.url);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 运行时目录：与 src/main/control/state.js 的规则保持一致（Windows 上没有 XDG_RUNTIME_DIR）
@@ -564,6 +568,74 @@ async function main() {
 
   await api('shutdown');
   await sleep(1500);
+
+  // 面板常由「别的进程」拉起来（agent shell / cmd / npm），父进程一退管道就断，
+  // 之后每次写日志都会 EPIPE —— 之前会在 Windows 上弹「A JavaScript error occurred
+  // in the main process」。这里直接复现：启动一个实例，然后把读端全关掉，看它还能不能活。
+  const pipeProbe = await (async () => {
+    // 用真实二进制（.bin/electron 是个 node shim，pid 对不上，也不好判断存活）
+    const electronBinary = require('electron');
+    try {
+      fs.rmSync(statePath, { force: true }); // 等一个「新的」实例，避免读到上一次留下的 state.json
+    } catch {
+      /* ignore */
+    }
+    const child = spawn(electronBinary, [root, '--headless', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'], {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, AIBROWSER_HEADLESS: '1' },
+    });
+    // 立刻把读端关掉：子进程随后的任何 stdout/stderr 写入都会拿到 EPIPE
+    child.stdout.destroy();
+    child.stderr.destroy();
+    const started = Date.now();
+    let ready = false;
+    let lastState = null;
+    while (Date.now() - started < 30000) {
+      const state = readState();
+      lastState = state;
+      if (state && state.pid === child.pid) {
+        try {
+          const health = await fetch(`http://127.0.0.1:${state.port}/health`);
+          if (health.ok) {
+            ready = true;
+            break;
+          }
+        } catch {
+          /* 还没起来 */
+        }
+      }
+      await sleep(300);
+    }
+    const alive = child.exitCode === null;
+    child.kill('SIGTERM');
+    await sleep(800);
+    return { ready, alive, pid: child.pid, mode: lastState?.mode || null };
+  })();
+  check(pipeProbe.ready && pipeProbe.alive, '日志管道断开（EPIPE）时进程照常起来',
+    `ready=${pipeProbe.ready} alive=${pipeProbe.alive} pid=${pipeProbe.pid} mode=${pipeProbe.mode}`);
+
+  // 通过 CLI 拉起的实例，日志落在 <runtimeDir>/<mode>.log，不继承父进程的管道
+  const logRun = spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'serve', '--json'], {
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+  const daemonLog = path.join(os.homedir(), '.aibrowser', 'daemon.log');
+  const logPathGuess = fs.existsSync(daemonLog)
+    ? daemonLog
+    : path.join(process.env.XDG_RUNTIME_DIR || path.join(os.homedir(), '.aibrowser'), 'aibrowser', 'daemon.log');
+  let logText = '';
+  try {
+    logText = fs.readFileSync(logPathGuess, 'utf8');
+  } catch {
+    logText = '';
+  }
+  check(
+    logRun.status === 0 && logText.includes('[aibrowser] daemon · pid'),
+    'CLI 拉起的实例把日志写在 runtimeDir（不继承父进程管道）',
+    logPathGuess,
+  );
+  spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'stop'], { stdio: 'ignore' });
 
   console.log('\n--- GUI 启动日志 ---');
   try {

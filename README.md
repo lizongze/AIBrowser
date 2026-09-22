@@ -230,6 +230,10 @@ docs/NOTES.md               额外说明（显示质量 / 字体 / 缩放 / Wind
 
 - **面板里网页区域空着？** 网页是原生视图覆盖在面板槽位上的，不是 DOM；先看状态栏与「控制台」里的加载错误。
 - **代码文件打开没内容？** 早期版本在容器隐藏时创建编辑器会渲染 0 行，现已强制重新测量；仍有问题就把 `pvs console` 与 `panelState` 发出来。
+- **开面板前弹「A JavaScript error occurred in the main process」？** 那是日志写进了已断开的管道（EPIPE）：
+  拉起面板的 shell / cmd 退出后，`stderr` 就断了。现在 `pvs serve` 会把子进程日志写到
+  `<runtimeDir>/gui.log`（或 `daemon.log`），写不出去的日志直接丢弃，未捕获异常记进
+  `<runtimeDir>/aibrowser-crash.log` 而不弹模态框。想恢复弹框调试：`AIBROWSER_CRASH_DIALOG=1`。
 - **热重载没反应？** 它只盯**面板里打开的文件**和**该页面实际引用的本地资源**（`pvs debugWatch` 会列出清单）；
   没打开、也没被引用的文件改了不会刷新，轮询间隔 0.6s。
 - **想要普通窗口而不是最大化？** `electron . --no-maximize`。

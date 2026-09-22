@@ -152,6 +152,36 @@ Electron 对自定义 `pvs://` 协议不产生 resource timing 条目，只能�
 资源类型白名单见 `src/main/watch-scope.js`（前端 / 样式 / 模板 / 后端 / 数据接口 / 测试 / 配置 / 文档 / 资源，共 9 类 160 种后缀）。
 查看当前范围：`pvs debugWatch`（HTTP 同名的 `debugWatch` 动作）。
 
+## 开面板前弹「A JavaScript error occurred in the main process」
+
+现象：别的 agent 拉起面板时，Windows 上先弹几个错误框再正常打开：
+
+```
+Uncaught Exception: Error: EPIPE: broken pipe, write
+    at Socket.write (node:internal/net:63:18)
+    at D:\...\src\main\main.js:189:20
+    at Session.<anonymous> (node:electron/js2c/browser_init)
+```
+
+原因：`main.js:189` 是 `handle('ui:ready')` 里的 `process.stderr.write(...)`。面板常由**别的进程**拉起来
+（agent 的 shell / cmd / npm），那些父进程随时会退出，stdout/stderr 的管道随之断开；之后任何一次写日志
+都拿到 EPIPE。Node 把它当作未捕获异常，而 Electron 对主进程未捕获异常的默认行为就是**弹一个模态框** ——
+面板本身完全正常，就是门口多了一堆框。
+
+修法分三层（任何一层单独都不够）：
+
+1. **写日志不抛**：新增 `src/main/safe-io.js`，`writeStderr`/`writeStdout` 先判断流是否已断开，
+   再 `try/catch` 兜底，并给 stdout/stderr 挂上只吞 EPIPE 的 `error` 监听
+   （其它错误照旧抛出，不掩盖真 bug）。主进程、CLI、MCP server、smoke 的日志都走它。
+2. **不弹框**：`installCrashGuard()` 在 app ready 之前装 `uncaughtException`/`unhandledRejection`：
+   「对端没了」类直接丢弃；其它记到 `<runtimeDir>/aibrowser-crash.log` 并继续跑
+   （要复现原始弹框：`AIBROWSER_CRASH_DIALOG=1`）。
+3. **从源头避开**：`pvs serve` 拉起子进程时不再继承父进程管道，日志落到
+   `<runtimeDir>/gui.log` 或 `daemon.log`（超过 2MB 自动清空），启动输出里会打印路径。
+
+验收：verify 66/66（新增两项：把实例的 stdout/stderr 读端立刻关掉它仍能正常起来并对 `/health` 响应；
+CLI 拉起的实例日志确实写在 runtimeDir），smoke 15/15（新增 EPIPE 判定、往断流写日志、崩溃兜底等 5 项）。
+
 ## 文件树上边那条「pvs-edit-xxxx」是哪来的
 
 现象：文件树上方突然多出一条胶囊，写着 `pvs-edit-Guk4mo` 之类，完全不知道是什么。

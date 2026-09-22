@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 const { readState, probe, pidAlive, runtimeDir, env } = require('../control/state');
+const { writeStderr } = require('../safe-io');
 
 const ELECTRON_BIN = require('electron');
 
@@ -142,7 +143,7 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
     env: { ...process.env, AIBROWSER_HEADLESS: '1' },
   });
   child.unref();
-  if (!quiet) process.stderr.write(`[pvs] 启动${headless ? '无头预览服务' : '预览面板'}（pid ${child.pid}）…\n`);
+  if (!quiet) writeStderr(`[pvs] 启动${headless ? '无头预览服务' : '预览面板'}（pid ${child.pid}）…`);
 
   const startedAt = Date.now();
   const ready = await waitForReady({ timeoutMs: mode === 'gui' ? 30000 : 25000, startedAt });

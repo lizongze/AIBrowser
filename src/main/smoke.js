@@ -4,9 +4,10 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const { writeStdout, isStreamGone, write, handleCrash, crashLogPath } = require('./safe-io');
 
 function log(ok, message, extra) {
-  process.stdout.write(`${ok ? '  ✓' : '  ✗'} ${message}${extra ? ` — ${extra}` : ''}\n`);
+  writeStdout(`${ok ? '  ✓' : '  ✗'} ${message}${extra ? ` — ${extra}` : ''}`);
   return ok;
 }
 
@@ -17,7 +18,7 @@ async function runSmokeTest({ manager, files, server, app }) {
     log(ok, message, extra);
   };
 
-  process.stdout.write('\nAIBrowser 自检\n');
+  writeStdout('\nAIBrowser 自检');
 
   // 准备临时示例页面
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pvs-smoke-'));
@@ -119,8 +120,40 @@ async function runSmokeTest({ manager, files, server, app }) {
     check(false, '代码文件语言识别', err.message);
   }
 
+  // 8. 日志/崩溃兜底：管道断开（EPIPE）不能把主进程弄崩，也不能弹模态框
+  const { PassThrough } = require('node:stream');
+  check(isStreamGone({ code: 'EPIPE' }) && !isStreamGone(new Error('boom')), '只把「管道断开」当可忽略错误', 'EPIPE / ERR_STREAM_DESTROYED …');
+  const dead = new PassThrough();
+  dead.destroy();
+  let threw = null;
+  let written = null;
+  try {
+    written = write(dead, 'x');
+  } catch (err) {
+    threw = err;
+  }
+  check(threw === null && written === false, '往断掉的流写日志不会抛异常', threw ? threw.message : `write→${written}`);
+  check(process.listeners('uncaughtException').length > 0, '主进程已装崩溃兜底（不弹模态框）', `${process.listeners('uncaughtException').length} 个监听`);
+  check(handleCrash('uncaughtException', { code: 'EPIPE' }).ignored === true, 'EPIPE 类异常直接丢弃');
+  const probe = new Error('smoke-probe-crash');
+  const recorded = handleCrash('uncaughtException', probe);
+  let crashText = '';
+  try {
+    crashText = fs.readFileSync(crashLogPath(), 'utf8');
+  } catch {
+    crashText = '';
+  }
+  check(!recorded.ignored && crashText.includes('smoke-probe-crash'), '真实异常记入 crash log', path.basename(crashLogPath() || ''));
+  // 把自检探针留下的那条清掉（含多行堆栈），免得污染真实 crash log
+  try {
+    const entries = crashText.split(/\n(?=\[\d{4}-)/); // 每条以时间戳开头
+    fs.writeFileSync(crashLogPath(), entries.filter((entry) => !entry.includes('smoke-probe-crash')).join(''));
+  } catch {
+    /* ignore */
+  }
+
   const passed = results.filter(Boolean).length;
-  process.stdout.write(`\n结果：${passed}/${results.length} 项通过\n\n`);
+  writeStdout(`\n结果：${passed}/${results.length} 项通过\n`);
   return passed === results.length ? 0 : 1;
 }
 

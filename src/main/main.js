@@ -5,6 +5,12 @@ const fs = require('node:fs');
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu, screen } = require('electron');
 const { detectScaleFactor, wslgRecommendedScale } = require('./display-scale');
 const config = require('./config');
+// 日志出口：拉起面板的父进程（agent shell / npm / cmd）退出后管道会断，
+// 直接写 stderr 会抛 EPIPE 并弹出「A JavaScript error occurred in the main process」。
+// 统一走 logErr：写不出去就丢弃，面板照常用。
+const { writeStderr: logErr, installCrashGuard } = require('./safe-io');
+// 弹窗兜底：管道断开之类的「错误」不该变成「A JavaScript error occurred in the main process」
+installCrashGuard();
 
 // ---- WSL / 容器兼容：必须在 app ready 之前 ----
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
@@ -30,15 +36,15 @@ const wslgScale = (scaleInfo.scale || nativeWindows) ? null : wslgRecommendedSca
 if (scaleInfo.scale) {
   // 显式指定（--scale-factor / AIBROWSER_SCALE）永远优先
   app.commandLine.appendSwitch('force-device-scale-factor', String(scaleInfo.scale));
-  process.stderr.write(`[aibrowser] 渲染缩放 ${scaleInfo.scale}x（来源：${scaleInfo.source}${scaleInfo.detail ? ' · ' + scaleInfo.detail : ''}）\n`);
+  logErr(`[aibrowser] 渲染缩放 ${scaleInfo.scale}x（来源：${scaleInfo.source}${scaleInfo.detail ? ' · ' + scaleInfo.detail : ''}）\n`);
 } else if (wslgScale) {
   // WSLg 把 devicePixelRatio 报成 2.25（实测），远大于 Windows 桌面的实际缩放，
   // 于是面板文字显得又小又虚。这里默认纠正到 1.25x（可用 --scale-factor 覆盖，
   // 或设 AIBROWSER_WSLG_SCALE=0 关掉）。
   app.commandLine.appendSwitch('force-device-scale-factor', String(wslgScale));
-  process.stderr.write(`[aibrowser] 渲染缩放 ${wslgScale}x（WSLg 默认纠正，--scale-factor 可覆盖）\n`);
+  logErr(`[aibrowser] 渲染缩放 ${wslgScale}x（WSLg 默认纠正，--scale-factor 可覆盖）\n`);
 } else {
-  process.stderr.write(
+  logErr(
     `[aibrowser] 渲染缩放：系统默认${scaleInfo.detail ? `（探测参考 ${scaleInfo.detail}）` : ''}`
     + '；觉得字小可用 --scale-factor 1.25/1.5\n',
   );
@@ -157,7 +163,7 @@ function createWindow() {
   win.once('ready-to-show', () => {
     // 默认最大化全屏铺满可用区域（面板类工具的常态用法）；--no-maximize 可保持窗口大小
     if (!flags['no-maximize']) win.maximize();
-    process.stderr.write(`[aibrowser] 窗口内容尺寸 ${win.getContentSize().join('×')} · 渲染缩放 ${scaleInfo.scale || '系统默认'}
+    logErr(`[aibrowser] 窗口内容尺寸 ${win.getContentSize().join('×')} · 渲染缩放 ${scaleInfo.scale || '系统默认'}
 `);
     win.show();
     state.ready = true;
@@ -186,7 +192,7 @@ function registerIpc() {
   const manager = () => state.manager;
 
   handle('ui:ready', async () => {
-    process.stderr.write('[aibrowser] 渲染层就绪，补发排队请求 ' + state.pendingRequests.length + ' 条\n');
+    logErr('[aibrowser] 渲染层就绪，补发排队请求 ' + state.pendingRequests.length + ' 条\n');
     // 面板就绪：处理此前排队的控制请求
     state.rendererReady = true;
     const pending = state.pendingRequests.splice(0, state.pendingRequests.length);
@@ -300,9 +306,9 @@ function registerIpc() {
     config.write({ hotReload: enabled });
     if (enabled) {
       const { describeExtensions } = require('./watch-scope');
-      process.stderr.write(`[aibrowser] 热重载 已开启（只盯面板里打开的文件 + 它加载的资源 · 600ms · 覆盖 ${describeExtensions()}）\n`);
+      logErr(`[aibrowser] 热重载 已开启（只盯面板里打开的文件 + 它加载的资源 · 600ms · 覆盖 ${describeExtensions()}）\n`);
     } else {
-      process.stderr.write('[aibrowser] 热重载 已关闭\n');
+      logErr('[aibrowser] 热重载 已关闭\n');
     }
     return { enabled };
   });
@@ -316,7 +322,7 @@ function registerIpc() {
       : Math.min(Math.max(current + (payload.delta || 0), 0.6), 3);
     win.webContents.setZoomFactor(next);
     const saved = config.write({ uiScale: next });
-    process.stderr.write(`[aibrowser] 界面缩放 ${Math.round(next * 100)}%\n`);
+    logErr(`[aibrowser] 界面缩放 ${Math.round(next * 100)}%\n`);
     return { factor: next, saved: saved.uiScale };
   });
 
@@ -513,7 +519,7 @@ async function bootstrap() {
       // 面板还没就绪时，把「打开会话」类事件排队，就绪后补发，避免界面漏渲染
       if (channel === 'ui:open' && !state.rendererReady && state.window && !state.window.isDestroyed()) {
         state.pendingRequests.push(payload);
-        process.stderr.write('[aibrowser] ui:open 排队（面板未就绪）\n');
+        logErr('[aibrowser] ui:open 排队（面板未就绪）\n');
         return;
       }
       broadcast(channel, payload);
@@ -538,7 +544,7 @@ async function bootstrap() {
   // GPU 状态（便于确认硬件加速是否真的生效）
   try {
     const gpu = app.getGPUFeatureStatus();
-    process.stderr.write(
+    logErr(
       `[aibrowser] GPU 合成=${gpu.gpu_compositing} 光栅化=${gpu.rasterization}`
       + ` WebGL=${gpu.webgl} 视频解码=${gpu.video_decode}\n`,
     );
@@ -547,7 +553,7 @@ async function bootstrap() {
   }
 
   // 守护进程把连接信息打到 stderr，便于脚本读取
-  process.stderr.write(`[aibrowser] ${state.mode} · pid ${process.pid} · http://127.0.0.1:${state.server.port} · socket ${state.server.state.socket}\n`);
+  logErr(`[aibrowser] ${state.mode} · pid ${process.pid} · http://127.0.0.1:${state.server.port} · socket ${state.server.state.socket}\n`);
 
   if (smokeTest) {
     const code = await runSmokeTest({ manager: state.manager, files, server: state.server, app });
@@ -560,7 +566,7 @@ async function bootstrap() {
   const urlFlag = flags.url;
   if (urlFlag) {
     await state.manager.open({ url: String(urlFlag), focus: true }).catch((err) => {
-      process.stderr.write(`[aibrowser] 打开 URL 失败：${err.message}\n`);
+      logErr(`[aibrowser] 打开 URL 失败：${err.message}\n`);
     });
   }
   for (const target of targets) {
@@ -570,7 +576,7 @@ async function bootstrap() {
       if (flags.mode === 'code') await state.manager.openCode({ file: abs });
       else await state.manager.openPath(abs);
     } catch (err) {
-      process.stderr.write(`[aibrowser] 打开 ${abs} 失败：${err.message}\n`);
+      logErr(`[aibrowser] 打开 ${abs} 失败：${err.message}\n`);
     }
   }
 }
@@ -628,6 +634,6 @@ process.on('SIGTERM', () => gracefulQuit());
 process.on('SIGINT', () => gracefulQuit());
 
 app.whenReady().then(bootstrap).catch((err) => {
-  process.stderr.write(`[aibrowser] 启动失败：${err && err.stack ? err.stack : err}\n`);
+  logErr(`[aibrowser] 启动失败：${err && err.stack ? err.stack : err}\n`);
   app.exit(1);
 });

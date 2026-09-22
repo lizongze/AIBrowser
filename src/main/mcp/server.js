@@ -24,11 +24,13 @@ const fs = require('node:fs');
 
 const { send, ensureTarget, stopTarget, resolveTarget } = require('../cli/client');
 const { readState } = require('../control/state');
+// MCP 客户端（agent）随时可能退出，stderr 管道断了不该把 server 弄崩
+const { writeStderr, writeStdout } = require('../safe-io');
 
 const SERVER_INFO = { name: 'aibrowser', version: require('../../../package.json').version };
 const PROTOCOL_VERSION = '2024-11-05';
 
-const log = (message) => process.stderr.write(`[aibrowser-mcp] ${message}\n`);
+const log = (message) => writeStderr(`[aibrowser-mcp] ${message}`);
 
 // ---------------------------------------------------------------- 工具定义
 
@@ -326,7 +328,7 @@ async function handleTool(name, args) {
 // ---------------------------------------------------------------- JSON-RPC over stdio
 
 function write(message) {
-  process.stdout.write(`${JSON.stringify(message)}\n`);
+  writeStdout(JSON.stringify(message));
 }
 
 function respond(id, result) {

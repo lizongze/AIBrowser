@@ -6,6 +6,7 @@ const { parseArgs, HELP } = require('./args');
 const { send, ensureTarget, resolveTarget, stopTarget } = require('./client');
 const { readState, pidAlive, socketPath, runtimeDir } = require('../control/state');
 const { normalizePath } = require('../file-service');
+const { writeStdout, writeStderr } = require('../safe-io');
 
 const EXIT_OK = 0;
 const EXIT_FAIL = 1;
@@ -20,7 +21,7 @@ for (const stream of [process.stdout, process.stderr]) {
 
 function out(text) {
   try {
-    process.stdout.write(text.endsWith('\n') ? text : `${text}\n`);
+    writeStdout(text);
   } catch {
     /* 下游已关闭 */
   }
@@ -28,7 +29,7 @@ function out(text) {
 
 function errOut(text) {
   try {
-    process.stderr.write(text.endsWith('\n') ? text : `${text}\n`);
+    writeStderr(text);
   } catch {
     /* 下游已关闭 */
   }
@@ -324,6 +325,23 @@ async function commandStatus(_args, flags) {
   return alive.ok ? EXIT_OK : EXIT_FAIL;
 }
 
+/** 打开子进程的日志文件（超过 2MB 先清空，避免无限增长） */
+function setupChildLog(name) {
+  try {
+    const dir = runtimeDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${name}.log`);
+    try {
+      if (fs.statSync(file).size > 2 * 1024 * 1024) fs.writeFileSync(file, '');
+    } catch {
+      /* 文件不存在就由 openSync 新建 */
+    }
+    return { path: file, fd: fs.openSync(file, 'a') };
+  } catch {
+    return { path: null, fd: 'ignore' };
+  }
+}
+
 async function commandServe(_args, flags) {
   const wantGui = Boolean(flags.gui);
   const existing = await resolveTarget({ prefer: wantGui ? 'gui' : 'daemon' });
@@ -345,9 +363,14 @@ async function commandServe(_args, flags) {
   const { projectRoot, waitForReady } = require('./client');
   const ELECTRON_BIN = require('electron');
   const startedAt = Date.now();
+  // 子进程的 stdout/stderr 落盘到 <runtimeDir>/<mode>.log，而不是继承父进程的管道：
+  // 拉起面板的 agent shell / cmd 随时会退出，继承的管道一断，子进程每次写日志都会拿到
+  // EPIPE（Windows 上就是「A JavaScript error occurred in the main process」弹窗）。
+  // 落盘既避免这个问题，也留下可查的启动日志。
+  const logFile = setupChildLog(wantGui ? 'gui' : 'daemon');
   const child = spawn(ELECTRON_BIN, [projectRoot(), ...(wantGui ? [] : ['--headless']), ...(flags.port ? ['--port', String(flags.port)] : [])], {
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', logFile.fd, logFile.fd],
     env: { ...process.env, ...(wantGui ? {} : { AIBROWSER_HEADLESS: '1' }) },
   });
   child.unref();
@@ -371,6 +394,7 @@ async function commandServe(_args, flags) {
     out(`已启动${wantGui ? '预览面板' : '无头预览服务'} · pid ${info.pid} · 端口 ${info.port}`);
     out(`  控制通道：${info.socket}`);
     out(`  HTTP    ：${info.endpoint}（Header: X-PVS-Token: ${info.token}）`);
+    if (logFile.path) out(`  启动日志：${logFile.path}`);
   }
   return EXIT_OK;
 }
