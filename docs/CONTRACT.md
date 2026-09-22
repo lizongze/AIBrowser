@@ -191,3 +191,5 @@ WSLg 下 Chromium 报告的 devicePixelRatio（2.25）大于 Windows 桌面缩�
 - 无头会话用 `BrowserWindow({ show:false, webPreferences:{ offscreen:false } })`，等 `did-finish-load` + `requestAnimationFrame` 稳定后再 `capturePage()`，避免拍到白屏。
 - `fullPage`：调 `webContents.executeJavaScript` 拿 `document.documentElement.scrollHeight`，临时 `setContentSize` 后截图，再还原。
 - `--smoke`：启动无头、开一个本地测试页、`eval` + 截图，退出码反映结果（供 CI 与 AI 自检）。
+
+> 显示质量、字体、渲染缩放、Windows 原生运行等环境相关事项见 `docs/NOTES.md`。

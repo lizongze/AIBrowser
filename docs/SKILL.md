@@ -232,4 +232,5 @@ npm run verify    # GUI 端到端 31 项：代码渲染 / 网页渲染 / 文件�
 | 用户偏好 | 同目录 `config.json`（界面缩放、主题、侧栏状态） |
 | 环境变量 | `AIBROWSER_RUNTIME`、`AIBROWSER_PORT`、`AIBROWSER_TOKEN`、`AIBROWSER_SCALE`、`AIBROWSER_WSLG_SCALE=0`；**旧前缀 `PREVIEW_STUDIO_*` 仍然兼容**（新前缀优先） |
 
-架构与完整接口契约见 `docs/CONTRACT.md`；项目能力总览见 `README.md`。
+架构与完整接口契约见 `docs/CONTRACT.md`；项目能力总览见 `README.md`；
+显示质量 / 字体 / 缩放 / Windows 原生运行等环境相关事项见 `docs/NOTES.md`。
