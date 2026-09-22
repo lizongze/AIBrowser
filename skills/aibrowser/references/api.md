@@ -39,7 +39,7 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 | action | 参数 | 返回 |
 | --- | --- | --- |
 | `ping` | — | `{pong,pid,mode,version}` |
-| `open` | `file` 或 `url`、`root`、`focus` | `{sessionId,url,title,kind}` |
+| `open` | `file` 或 `url`、`root`、`focus`、`fresh`（先关掉所有已有面板） | `{sessionId,url,title,kind}` |
 | `openCode` | `file`、`line`、`column` | `{sessionId,kind:'code',language}` |
 | `openPath` | `path`（目录自动找 index.html，按类型选网页/代码） | 同上 |
 | `list` | — | `{sessions:[…],roots:[…]}` |
@@ -56,6 +56,8 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 | `tree` | `dir` | `{dir,entries:[{name,path,dir,size}]}` |
 | `roots` | `root` | `{roots:[{id,dir}]}` |
 | `ui` | `view:'code'\|'web'\|'console'` | `{view}`（有面板时切视图） |
+| `batch` | `items`、`outDir`、`fullPage`、`timeout`、`format` | `{total,succeeded,failed,items:[{index,target,name,ok,image,images,width,height,bytes,source,sessionId}]}`；串行逐项切成活动标签，`source=panel` 表示该项截的是整块面板 |
+| `debugWatch` | `sessionId` | `{enabled,entry,files,pageAssets,extraFiles,intervalMs,extensions}`：热重载当前关注哪些文件 |
 | `shutdown` | — | 关闭该实例 |
 
 `sessionId` 可省略 —— 默认作用于「最近打开/聚焦」的会话。

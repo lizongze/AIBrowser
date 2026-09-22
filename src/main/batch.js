@@ -6,6 +6,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { normalizePath } = require('./file-service');
+const { activateSession, capturePanelShot, panelWindow } = require('./panel-shot');
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
 const DEFAULT_TIMEOUT = 20000;
@@ -127,6 +128,15 @@ async function waitReady(session, item, timeoutMs) {
   if (item.waitMs) await new Promise((r) => setTimeout(r, Number(item.waitMs)));
 }
 
+/** 关掉一个会话，失败不影响批次 */
+function closeQuietly(manager, session) {
+  try {
+    if (session && manager.sessions.has(session.id)) manager.close(session.id);
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * 执行批量任务。
  * @param {object} opts
@@ -158,6 +168,7 @@ async function runBatch(opts) {
   let okCount = 0;
   let failCount = 0;
   let skipCount = 0;
+  let pendingClose = null; // 上一项由本批次打开的面板，下一项开始前关掉
 
   for (let i = 0; i < items.length; i += 1) {
     const index = i + 1;
@@ -178,6 +189,13 @@ async function runBatch(opts) {
     const seen = used.get(baseName) || 0;
     used.set(baseName, seen + 1);
     const name = seen === 0 ? baseName : `${baseName}-${seen + 1}`;
+
+    // 串行推进：上一项截完就把它的面板收掉，面板里始终只有「当前这一项」
+    // （最后一项不关，方便直接看结果）。
+    if (pendingClose) {
+      closeQuietly(manager, pendingClose);
+      pendingClose = null;
+    }
 
     const itemStarted = Date.now();
     let session = null;
@@ -202,6 +220,7 @@ async function runBatch(opts) {
         });
         // 代码会话也能截图：screenshot() 内部会先把代码渲染成 pvs://code/ 页面
         session = opened.session;
+        pendingClose = session; // 本批次开出来的面板，下一项开始前关掉
       } else {
         await session.load(item.target ? { url: item.target } : item.url ? { url: item.url } : { file: item.file });
       }
@@ -215,6 +234,14 @@ async function runBatch(opts) {
       const started = { kind: 'open', index, target, name, url: session.url };
       onEvent?.(started);
 
+      // 串行 + 逐个激活：面板模式下截图依赖「当前活动标签」，非活动标签不产生帧。
+      // 每项都先把它切成活动标签再截，一项一项来。
+      let activated = null;
+      if (panelWindow(manager)) {
+        activated = await activateSession({ manager, session });
+        onEvent?.({ kind: 'activate', index, target, name, sessionId: session.id, activated });
+      }
+
       await waitReady(session, item, timeout);
 
       // 默认**只出一张整页图**；只有显式给 item.viewports（数组）时才多尺寸
@@ -224,12 +251,24 @@ async function runBatch(opts) {
         : [item.viewport || null];
       const ext = (item.format || format) === 'jpeg' ? 'jpg' : 'png';
       const images = [];
+      let source = null;
       for (let v = 0; v < viewports.length; v += 1) {
         if (viewports[v]) applyViewport(session, viewports[v], { resize: true });
-        const shot = await session.screenshot({
-          format: item.format || format,
-          fullPage: wantFullPage,
-        });
+        // 面板模式下代码会话只能截面板：它的 pvs://code/ 视图是隐藏的，隐藏视图不产生帧
+        // （表现就是「当前环境取不到渲染帧（host=view …）」一直超时）
+        let shot = null;
+        if (session.kind === 'code' && panelWindow(manager)) {
+          if (activated === false) await activateSession({ manager, session });
+          shot = await capturePanelShot({ manager, session, format: item.format || format });
+        }
+        if (!shot) {
+          shot = await session.screenshot({
+            format: item.format || format,
+            fullPage: wantFullPage,
+          });
+          shot.source = session.kind === 'code' ? 'code-page' : 'render';
+        }
+        source = shot.source;
         const suffix = viewports.length > 1 ? `-${(viewports[v] && viewports[v].width) || 'auto'}` : '';
         const imagePath = path.join(outAbsolute, `${String(index).padStart(3, '0')}-${name}${suffix}.${ext}`);
         await fsp.writeFile(imagePath, shot.buffer);
@@ -239,6 +278,7 @@ async function runBatch(opts) {
           height: shot.height,
           bytes: shot.bytes,
           fullPage: wantFullPage,
+          source: shot.source,
         });
       }
       restoreViewport(session, savedSize);
@@ -263,6 +303,8 @@ async function runBatch(opts) {
         target,
         name,
         ok: true,
+        sessionId: session.id,
+        source,
         title: session.title,
         url: session.info().url,
         image: images[0].path,
@@ -284,6 +326,7 @@ async function runBatch(opts) {
         target,
         name,
         ok: false,
+        ...(session ? { sessionId: session.id } : {}),
         error: err && err.message ? err.message : String(err),
         elapsedMs: Date.now() - itemStarted,
       };

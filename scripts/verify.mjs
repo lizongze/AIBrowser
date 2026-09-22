@@ -433,6 +433,23 @@ async function main() {
   }, { label: '缩放重置' });
   check(resetZoom.ok, '重置界面缩放回到 100%', resetZoom.detail);
 
+  // 批量：混合 HTML + 代码文件，串行逐个激活标签再截；代码项在产品模式下必须走面板截图
+  const batchDir = path.join(root, '.aibrowser', 'verify-batch');
+  const sessionsBeforeBatch = (await api('list')).sessions.length;
+  const batch = await api('batch', { items: [htmlFile, codeFile], outDir: batchDir });
+  check(batch.total === 2 && batch.succeeded === 2, '批量任务：HTML + 代码文件都能截到图',
+    `${batch.succeeded}/${batch.total} · ${batch.items.map((i) => `${i.name}:${i.source || i.error || ''}`).join(' · ')}`);
+  const codeItem = batch.items.find((i) => i.target === codeFile) || {};
+  check(codeItem.source === 'panel' && codeItem.width > 100,
+    '批量里的代码项走面板截图（不是隐藏视图取帧）',
+    `${codeItem.source} ${codeItem.width}×${codeItem.height}`);
+  check(batch.items.every((i) => fs.existsSync(i.image)), '批量结果图片都落在磁盘上');
+  check(fs.readFileSync(path.join(batchDir, 'report.json'), 'utf8').includes('"succeeded": 2'), '批量报告写入 outDir');
+  const openAfterBatch = await api('list');
+  // 批量自己开的标签要在下一项开始前关掉，只留最后一项；别的会话（验收前面的步骤开的）不归它管
+  check(openAfterBatch.sessions.length <= sessionsBeforeBatch + 1, '批量结束后面板不堆标签',
+    `会话 ${sessionsBeforeBatch} → ${openAfterBatch.sessions.length}`);
+
   // 空标签：可以连续新建多个，并且排在所有会话标签之后
   await api('panelAction', { action: 'new-tab' });
   await sleep(300);

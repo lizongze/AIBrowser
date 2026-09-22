@@ -22,6 +22,8 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/main/main.js` | 应用引导。CLI 参数（`pvs` 与 `electron .` 共用）；`--headless` 走无头，否则建 GUI 窗口；全局开关：`--no-sandbox`、`--disable-gpu`、`--disable-dev-shm-usage`（WSL/容器必需）。 |
+| `src/main/watch-scope.js` | 热重载关注的类型白名单（前端/样式/模板/后端/数据接口/测试/配置/文档/资源，9 类 160 种后缀）。 |
+| `src/main/panel-shot.js` | 面板截图：切活动标签 + 截整个面板窗口，供控制 API 与批量任务共用（代码会话的原生视图是隐藏的，取不到帧）。 |
 | `src/main/preview-session.js` | `PreviewSession`：一个预览网页的 `WebContentsView`。负责加载 URL/文件、`pvs://` 协议、截图、读 DOM、执行 JS、收集控制台日志、文件监听热重载。 |
 | `src/main/preview-manager.js` | 会话表：create/get/list/close/closeAll，字号与网络开关，GUI 侧视图寄宿（`attachView`）。 |
 | `src/main/file-service.js` | 目录读取、文件读取（文本/二进制判定）、文件树、根目录切换与授权。 |

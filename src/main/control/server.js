@@ -10,6 +10,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { bindSocket, runtimeDir, socketPath, writeState, env } = require('./state');
+const { activateSession, capturePanelShot, panelWindow } = require('../panel-shot');
 
 const VERSION = require('../../../package.json').version;
 const MAX_BODY = 8 * 1024 * 1024;
@@ -444,54 +445,29 @@ class ControlServer {
         const session = manager.resolve(params.sessionId);
         // 代码会话在 GUI 下优先「截面板」：包含标签条与行号栏，和用户看到的画面一致；
         // 无头模式没有面板，则退回 screenshot() 内部的代码页渲染。
-        if (session.kind === 'code' && session.file && manager.guiWindow && !manager.guiWindow.isDestroyed()) {
-          const win = manager.guiWindow;
-          try {
-            // 让面板聚焦到该代码会话，并切到代码视图（否则可能截到网页视图）
-            manager.setFocus(session.id);
-            this.broadcast('ui:focus', { sessionId: session.id, view: 'code' });
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            const focusBounds = session.view ? session.view.getBounds() : null;
-            if (focusBounds && typeof session.view.setVisible === 'function') session.view.setVisible(false);
-            // Windows 上隐藏/最小化的窗口 capturePage 会返回空帧；这里确保窗口可见后重试
-            try {
-              if (win.isMinimized()) win.restore();
-              if (!win.isVisible()) win.showInactive();
-            } catch {
-              /* ignore */
+        // 注意：面板模式下代码页面的原生视图是隐藏的（面板用 CodeMirror 显示），隐藏视图不产生帧。
+        if (session.kind === 'code' && session.file && panelWindow(manager)) {
+          const activated = await activateSession({ manager, session });
+          const shot = await capturePanelShot({ manager, session, format: params.format, quality: params.quality });
+          if (shot) {
+            const result = {
+              sessionId: session.id,
+              format: shot.format,
+              width: shot.width,
+              height: shot.height,
+              bytes: shot.bytes,
+              dataBase64: shot.buffer.toString('base64'),
+              buffer: shot.buffer,
+              source: 'panel',
+              activated,
+            };
+            if (params.out !== undefined && params.out !== null) {
+              const out = params.out ? path.resolve(String(params.out)) : path.join(os.tmpdir(), `pvs-panel-${session.id}-${Date.now()}.png`);
+              await fsp.mkdir(path.dirname(out), { recursive: true });
+              await fsp.writeFile(out, shot.buffer);
+              result.filePath = out;
             }
-            // 隐藏/显示原生视图会改变合成布局，必须等合成器刷新后再截，否则拿到空帧
-            await new Promise((resolve) => setTimeout(resolve, 350));
-            let image = await win.webContents.capturePage();
-            if (!image || image.isEmpty() || image.getSize().width === 0) {
-              await new Promise((resolve) => setTimeout(resolve, 350));
-              image = await win.webContents.capturePage();
-            }
-            if (focusBounds && typeof session.view.setVisible === 'function') session.view.setVisible(true);
-            if (image && !image.isEmpty()) {
-              const data = (params.format === 'jpeg') ? image.toJPEG(params.quality ?? 85) : image.toPNG();
-              const size = image.getSize();
-              const result = {
-                sessionId: session.id,
-                format: params.format === 'jpeg' ? 'jpeg' : 'png',
-                width: size.width,
-                height: size.height,
-                bytes: data.length,
-                dataBase64: data.toString('base64'),
-                buffer: data,
-                image,
-                source: 'panel',
-              };
-              if (params.out !== undefined && params.out !== null) {
-                const out = params.out ? path.resolve(String(params.out)) : path.join(os.tmpdir(), `pvs-panel-${session.id}-${Date.now()}.png`);
-                await fsp.mkdir(path.dirname(out), { recursive: true });
-                await fsp.writeFile(out, data);
-                result.filePath = out;
-              }
-              return result;
-            }
-          } catch {
-            /* 面板截图失败才退回代码页渲染 */
+            return result;
           }
         }
         const urlBefore = session.url;

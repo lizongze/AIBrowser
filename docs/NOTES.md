@@ -152,6 +152,19 @@ Electron 对自定义 `pvs://` 协议不产生 resource timing 条目，只能�
 资源类型白名单见 `src/main/watch-scope.js`（前端 / 样式 / 模板 / 后端 / 数据接口 / 测试 / 配置 / 文档 / 资源，共 9 类 160 种后缀）。
 查看当前范围：`pvs debugWatch`（HTTP 同名的 `debugWatch` 动作）。
 
+## 面板模式下代码截图为什么会「取不到渲染帧」
+
+现象：`pvs batch` 一次传 5 个文件，HTML 全成功，`.css/.js/.vue` 全报
+「当前环境取不到渲染帧（host=view …）」。
+
+原因：面板里代码是 CodeMirror 渲染的，会话内部承载 `pvs://code/` 页面的原生 `WebContentsView`
+是**隐藏**的，而隐藏视图不产生帧 —— `capturePage()` 只会拿到空帧直到 10s 超时。
+网页会话走另一条渲染路径（可见的原生视图），所以同一批里只有代码文件挂。
+
+解决：面板模式下代码项截图前先把它**切成活动标签**（`setFocus` + 广播 `ui:focus`，
+再等渲染进程确认），然后**截整个面板窗口**（`src/main/panel-shot.js`，控制 API 与批量共用）。
+同样的逻辑让「隐藏视图取帧」这条路径不再被误用；无头模式仍走代码页渲染（`source=code-page`）。
+
 ## 代码文件截图
 
 代码会话没有网页图层（只有编辑器 DOM），所以早期在无头模式下无法截图。现在 `screenshot()`

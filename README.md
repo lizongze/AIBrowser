@@ -92,7 +92,9 @@ stdio 传输，无第三方依赖，暴露 11 个工具：`browser_open` / **`br
 `browser_write_file` / `browser_sessions` / `browser_health`。
 
 **批量以「列表参数」为一等公民**：`browser_batch({ items: [...], outDir })` 一次传清单，
-串行打开并逐项截图，返回结果清单（含截图路径、尺寸、可选文本、控制台报错）。详见 `docs/BATCH.md`。
+串行打开并逐项截图，返回结果清单（含截图路径、尺寸、来源、可选文本、控制台报错）。详见 `docs/BATCH.md`。
+串行 + **逐个切成活动标签**：面板里始终只有当前这一项，代码文件也能截到面板图
+（隐藏的原生视图不产生帧，所以代码项截的是面板；结果里的 `source` 会写明 `panel` / `code-page`）。
 
 ## 批量任务（CLI）
 
