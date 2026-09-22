@@ -691,7 +691,13 @@ class PreviewSession {
         const err = new Error(`页面执行超时（${timeoutMs}ms）：页面可能被同步脚本阻塞`);
         err.code = 'ETIMEOUT';
         reject(err);
-        wc.reload().catch(() => {});
+        // 注意：Electron 的 reload() 返回 void，直接 .catch 会在定时器里抛错并崩溃
+        try {
+          const pending = wc.reload();
+          if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+        } catch {
+          /* ignore */
+        }
       }, timeoutMs);
     });
     try {

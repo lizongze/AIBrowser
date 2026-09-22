@@ -6,7 +6,8 @@
   "description": "基于 Chromium 内核的网页预览 + 代码高亮预览工具（AI 可调用）",
   "main": "src/main/main.js",
   "bin": {
-    "pvs": "bin/pvs.js"
+    "pvs": "bin/pvs.js",
+    "aibrowser-mcp": "bin/aibrowser-mcp.js"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -16,7 +17,8 @@
     "gui": "node bin/pvs.js serve --gui",
     "smoke": "npm run build && electron . --smoke-test --headless",
     "verify": "npm run build && node scripts/verify.mjs",
-    "panel:check": "electron scripts/panel-check.cjs"
+    "panel:check": "electron scripts/panel-check.cjs",
+    "mcp": "node bin/aibrowser-mcp.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

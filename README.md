@@ -71,6 +71,34 @@ $S shot --out /tmp/page.png --full-page --json
 | `references/api.md` | HTTP API 与全部动作名（长驻服务场景更省开销） |
 | `install.sh` | 安装到 `~/.codex/skills`、`~/.codefree-cli/skills` 等已有目录 |
 
+## MCP server（给支持 MCP 的 Agent）
+
+```json
+{ "mcpServers": { "aibrowser": {
+  "command": "node",
+  "args": ["/abs/path/to/aibrowser/bin/aibrowser-mcp.js"],
+  "env": { "PVS_HOME": "/abs/path/to/aibrowser" }
+} } }
+```
+
+stdio 传输，无第三方依赖，暴露 11 个工具：`browser_open` / **`browser_batch`** / `browser_content` /
+`browser_eval` / `browser_screenshot` / `browser_console` / `browser_network` / `browser_read_file` /
+`browser_write_file` / `browser_sessions` / `browser_health`。
+
+**批量以「列表参数」为一等公民**：`browser_batch({ items: [...], outDir })` 一次传清单，
+串行打开并逐项截图，返回结果清单（含截图路径、尺寸、可选文本、控制台报错）。详见 `docs/BATCH.md`。
+
+## 批量任务（CLI）
+
+```bash
+pvs batch --from list.json --out ./shots        # 清单文件（json/txt/csv）
+pvs batch https://a.com ./page.html             # 直接给多个目标
+pvs batch --dir ./site --ext html               # 收集目录里的 HTML
+```
+
+产出 `<out>/report.json`（+ `.jsonl`）与 `NNN-<name>.png`；单项失败不影响其它项。
+**Windows 路径可直接传入**（`D:\dir\a.html` 自动转 `/mnt/d/dir/a.html`）。
+
 ## GUI 快捷键
 
 | 快捷键 | 作用 |

@@ -542,6 +542,37 @@ class ControlServer {
         return { editor: raw ? JSON.parse(raw) : null };
       }
 
+      // 批量：串行打开清单里的每项并截图（设计见 docs/BATCH.md）
+      case 'batch': {
+        const { runBatch } = require('../batch');
+        const items = Array.isArray(params.items) ? params.items : [];
+        if (!items.length) throw new Error('batch 需要 items 数组');
+        const outDir = params.outDir || 'aibrowser-shots';
+        const report = await runBatch({
+          items,
+          outDir,
+          fullPage: params.fullPage !== false,
+          format: params.format === 'jpeg' ? 'jpeg' : 'png',
+          timeout: Number(params.timeout) || undefined,
+          manager: this.manager,
+        });
+        // 结果清单落盘，便于 AI 后续读取或续跑
+        try {
+          const fsp = require('node:fs/promises');
+          const path = require('node:path');
+          await fsp.writeFile(path.join(report.outDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+          await fsp.writeFile(
+            path.join(report.outDir, 'report.jsonl'),
+            `${report.items.map((i) => JSON.stringify(i)).join('\n')}\n`,
+            'utf8',
+          );
+          report.reportPath = path.join(report.outDir, 'report.json');
+        } catch (err) {
+          this.manager.deps.broadcast('log', { level: 'warn', text: `写报告失败：${err.message}` });
+        }
+        return report;
+      }
+
       // 面板交互动作：等价于「点按钮」（新建标签、切视图、开关侧栏……），供验收与 AI 驱动
       case 'panelAction': {
         const win = this.manager.guiWindow;

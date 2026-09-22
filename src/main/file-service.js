@@ -7,6 +7,38 @@ const path = require('node:path');
 const os = require('node:os');
 const { detectLanguage, isWebPreviewable } = require('./language');
 
+
+/**
+ * 归一化用户传入的路径，重点是**在 WSL 里接受 Windows 路径**。
+ *   D:\\dir\\file.html      -> /mnt/d/dir/file.html
+ *   D:/dir/file.html        -> /mnt/d/dir/file.html
+ *   \\\\wsl.localhost\\Ubuntu\\home\\x -> /home/x     （WSL 网络路径回写为 Linux 路径）
+ *   \\\\wsl$\\Ubuntu\\home\\x         -> /home/x
+ * 非 WSL 平台或非 Windows 形式时原样返回。
+ */
+function normalizePath(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return raw;
+  const isWsl = process.platform === 'linux'
+    && (process.env.WSL_DISTRO_NAME || /microsoft/i.test(require('node:fs').existsSync('/proc/version')
+      ? require('node:fs').readFileSync('/proc/version', 'utf8') : ''));
+
+  // UNC：\\wsl.localhost\<distro>\... 或 \\wsl$\<distro>\...
+  const unc = raw.match(/^\\\\wsl(?:\$|\.localhost)\\[^\\]+[\\/]?(.*)$/i);
+  if (unc) {
+    const rest = unc[1].replace(/\\/g, '/');
+    return `/${rest}`.replace(/\/{2,}/g, '/');
+  }
+
+  // 盘符：D:\... 或 D:/...
+  const drive = raw.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drive && isWsl) {
+    const rest = drive[2].replace(/\\/g, '/');
+    return `/mnt/${drive[1].toLowerCase()}/${rest}`;
+  }
+  return raw;
+}
+
 const MAX_READ_BYTES = 4 * 1024 * 1024; // 代码预览上限
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '.cache', 'dist', '.next', '__pycache__', '.venv', 'venv', '.idea']);
 
@@ -18,7 +50,7 @@ class FileService {
   }
 
   addRoot(dir) {
-    const resolved = path.resolve(dir);
+    const resolved = path.resolve(normalizePath(dir));
     for (const root of this.roots.values()) {
       if (root.dir === resolved) return { root: root.dir, id: root.id };
     }
@@ -57,7 +89,7 @@ class FileService {
 
   /** 校验路径：必须在某个根目录内，否则抛错 */
   assertAllowed(target) {
-    const resolved = path.resolve(target);
+    const resolved = path.resolve(normalizePath(target));
     const root = this.rootContaining(resolved);
     if (!root) {
       const err = new Error(`路径不在任何已打开的项目目录内：${resolved}`);
@@ -68,16 +100,18 @@ class FileService {
   }
 
   async stat(target) {
+    const normalized = normalizePath(target);
     try {
-      const info = await fs.stat(target);
-      return { path: path.resolve(target), exists: true, dir: info.isDirectory(), size: info.size, mtimeMs: info.mtimeMs };
+      const info = await fs.stat(normalized);
+      return { path: path.resolve(normalized), exists: true, dir: info.isDirectory(), size: info.size, mtimeMs: info.mtimeMs };
     } catch {
-      return { path: path.resolve(target), exists: false, dir: false, size: 0 };
+      return { path: path.resolve(normalized), exists: false, dir: false, size: 0 };
     }
   }
 
   /** 列目录（供文件树），目录在前、按名称排序，跳过重目录 */
   async tree(dir, { includeIgnored = false } = {}) {
+    dir = normalizePath(dir);
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const out = [];
     for (const entry of entries) {
@@ -194,4 +228,4 @@ function defaultRoot() {
   return process.env.AIBROWSER_ROOT || process.cwd() || os.homedir();
 }
 
-module.exports = { FileService, mimeFor, MAX_READ_BYTES, defaultRoot, IGNORED_DIRS };
+module.exports = { FileService, mimeFor, normalizePath, MAX_READ_BYTES, defaultRoot, IGNORED_DIRS };

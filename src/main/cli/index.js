@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const { parseArgs, HELP } = require('./args');
 const { send, ensureTarget, resolveTarget, stopTarget } = require('./client');
 const { readState, pidAlive, socketPath, runtimeDir } = require('../control/state');
+const { normalizePath } = require('../file-service');
 
 const EXIT_OK = 0;
 const EXIT_FAIL = 1;
@@ -60,7 +61,7 @@ function resolveTargetArg(raw, { cwd = process.cwd() } = {}) {
   const value = String(raw || '').trim();
   if (!value) return { kind: 'none' };
   if (looksLikeUrl(value) && !fs.existsSync(path.resolve(cwd, value))) return { kind: 'url', url: value };
-  let abs = path.resolve(cwd, value);
+  let abs = path.resolve(cwd, normalizePath(value));
   if (!fs.existsSync(abs)) {
     // 尝试在项目根目录下补全
     const state = readState();
@@ -346,6 +347,47 @@ async function commandStop(_args, flags) {
   return result.stopped ? EXIT_OK : EXIT_FAIL;
 }
 
+/**
+ * 批量：给一份文件/URL 清单，串行打开并逐项截图（设计见 docs/BATCH.md）。
+ * 输出：stderr 打进度；stdout 逐项 JSONL；结束时写 report.json / report.jsonl。
+ */
+async function commandBatch(args, flags) {
+  const { runBatch, collectFromFile, collectFromDir } = require('../batch');
+  const items = [];
+  for (const arg of args) items.push(arg);
+  if (flags.from) items.push(...collectFromFile(String(flags.from)));
+  if (flags.dir) items.push(...collectFromDir(String(flags.dir), flags.ext));
+  if (!items.length) {
+    throw Object.assign(new Error('用法：pvs batch <url|file>… | --from list.txt|list.json | --dir <目录> [--ext html]'), { code: 'EUSAGE' });
+  }
+
+  const { state } = await ensureTarget(targetOptions(flags));
+  const outDir = path.resolve(String(flags.out || 'aibrowser-shots'));
+  const only = flags.json; // --json 时不打进度
+  const report = await send('batch', {
+    items,
+    outDir,
+    fullPage: flags['full-page'] !== false,
+    format: flags.format === 'jpeg' ? 'jpeg' : 'png',
+    timeout: flags.timeout ? Number(flags.timeout) : undefined,
+    stream: Boolean(!only),
+  }, { state, timeoutMs: 1000 * 60 * 30 });
+
+  if (only) {
+    jsonOut({ ok: report.failed === 0, ...report });
+  } else {
+    for (const item of report.items) {
+      out(`${item.ok ? '✓' : item.ok === null ? '–' : '✗'} ${String(item.index).padStart(3, '0')} `
+        + `${(item.name || '').padEnd(28)} ${item.ok ? `${item.width}×${item.height} ${humanSize(item.bytes)}` : item.error}`);
+    }
+    out('');
+    out(`共 ${report.total} 项 · 成功 ${report.succeeded} · 失败 ${report.failed} · 跳过 ${report.skipped} · 用时 ${(report.elapsedMs / 1000).toFixed(1)}s`);
+    out(`截图目录：${report.outDir}`);
+    if (report.reportPath) out(`结果清单：${report.reportPath}`);
+  }
+  return report.failed === 0 ? EXIT_OK : EXIT_FAIL;
+}
+
 const COMMANDS = {
   open: commandOpen,
   code: commandCode,
@@ -353,6 +395,7 @@ const COMMANDS = {
   ls: commandList,
   sessions: commandList,
   shot: commandShot,
+  batch: commandBatch,
   screenshot: commandShot,
   content: commandContent,
   text: commandContent,

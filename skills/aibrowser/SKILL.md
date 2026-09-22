@@ -60,6 +60,50 @@ $P network --on && $P reload && $P network --json
 $P code ./src/app.ts --line 42 --json
 ```
 
+## 批量处理清单（推荐）
+
+AI 手上有**文件列表 / URL 列表**时，不要循环调 N 次命令 —— 用 `batch` 一次传入，串行打开并逐项截图：
+
+```bash
+$P batch --from list.json --out ./shots --json     # 从清单文件
+$P batch https://a.com https://b.com ./page.html   # 直接给多个目标
+$P batch --dir ./site --ext html                   # 收集目录下的 HTML
+```
+
+`list.json` 支持字符串或对象（每项可覆盖选项）：
+
+```json
+[
+  "https://example.com/",
+  { "file": "./index.html", "name": "home", "fullPage": true, "content": "#main" },
+  { "url": "https://example.com/docs", "waitFor": "#content", "waitMs": 500 }
+]
+```
+
+每项可用字段：`url` / `file` / `root` / `name` / `fullPage` / `waitFor`（等待选择器）/ `waitMs` /
+`content`（额外抽取文本）/ `viewport` / `skip`。
+
+结果是一份清单：`<out>/report.json`（每项含 `image` 路径、`width`/`height`、`title`、可选 `content`、
+`consoleErrors`、`elapsedMs`），以及 `report.jsonl` 便于流式读取。
+**单项失败不影响其它项**，`errors` 汇总在末尾；退出码 0=全成功、1=有失败。
+
+- **Windows 路径可直接用**：`D:\\dir\\a.html` 会被自动转成 `/mnt/d/dir/a.html`（UNC 形式
+  `\\wsl.localhost\\<发行版>\\...` 也可）。支持在 WSL 与 Windows 原生两种运行方式下使用。
+
+## MCP（可选，给支持 MCP 的 agent）
+
+```json
+{ "mcpServers": { "aibrowser": {
+  "command": "node",
+  "args": ["<项目目录>/bin/aibrowser-mcp.js"],
+  "env": { "PVS_HOME": "<项目目录>" }
+} } }
+```
+
+工具：`browser_open`、**`browser_batch`（items 列表参数）**、`browser_content`、`browser_eval`、
+`browser_screenshot`、`browser_console`、`browser_network`、`browser_read_file`、`browser_write_file`、
+`browser_sessions`、`browser_health`。
+
 ## 必须遵守的三条
 
 1. **本地文件先授权目录**：`--root <dir>`（或先用面板打开该目录）。否则报 `ENOTALLOWED`。

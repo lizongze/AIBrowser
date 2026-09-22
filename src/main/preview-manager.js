@@ -4,6 +4,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { PreviewSession, cleanUrl, isLocalTarget } = require('./preview-session');
 const { detectLanguage, isWebPreviewable } = require('./language');
+const { normalizePath } = require('./file-service');
 
 class PreviewManager {
   /**
@@ -127,7 +128,7 @@ class PreviewManager {
     if (root) this.files.addRoot(root);
     let target = null;
     if (file) {
-      const abs = path.resolve(file);
+      const abs = path.resolve(normalizePath(file));
       if (!this.files.rootContaining(abs)) {
         const isFile = !fs.existsSync(abs) || fs.statSync(abs).isFile();
         this.files.addRootFor(abs, isFile);
@@ -154,7 +155,7 @@ class PreviewManager {
   /** 打开代码预览（GUI 里由渲染进程用 CodeMirror 显示；无头下只登记会话信息） */
   async openCode({ file, root, line = null, column = null, focus = true } = {}) {
     if (!file) throw new Error('openCode 需要 file 参数');
-    const abs = path.resolve(file);
+    const abs = path.resolve(normalizePath(file));
     if (!this.files.rootContaining(abs)) {
       this.files.addRootFor(abs, true);
       this.deps.broadcast('roots:updated', { roots: this.files.listRoots() });
