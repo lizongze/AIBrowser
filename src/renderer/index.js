@@ -40,6 +40,7 @@ const el = {
   webEmpty: $('web-empty'),
   codeName: $('code-name'),
   codeLang: $('code-lang'),
+  codePath: $('code-path'),
   codeSave: $('code-save'),
   editorHost: $('editor'),
   consoleTabs: $('console-tabs'),
@@ -108,6 +109,42 @@ function dirname(p) {
   const parts = String(p).replace(/[\\/]+$/, '').split(/[\\/]/);
   parts.pop();
   return parts.join('/') || '/';
+}
+
+/**
+ * 代码区头部展示的路径：优先「相对项目根目录」，更短也更能体现位置；
+ * 没有根目录或不在根目录内时退回绝对路径。
+ */
+function displayPath(file) {
+  const target = String(file || '');
+  if (!target) return '';
+  // 打开文件时主进程会把文件所在目录也注册成根目录，所以要挑「最外层」的那个，
+  // 相对路径里才会保留目录层级，截图时一眼能看出文件在项目中的位置。
+  const roots = state.roots
+    .map((item) => String(item.dir || '').replace(/[\\/]+$/, ''))
+    .filter((dir) => dir && (target === dir || target.startsWith(dir + '/') || target.startsWith(dir + '\\')))
+    .sort((a, b) => a.length - b.length);
+  for (const dir of roots) {
+    const relative = target.slice(dir.length + 1);
+    // 只有带目录层级的相对路径才有信息量（和被显示的文件名不重复）
+    if (relative.includes('/') || relative.includes('\\')) return relative;
+  }
+  // 文件就在根目录下、或不在任何根目录里：直接给绝对路径
+  return target;
+}
+
+/**
+ * 空间不足时按「目录段」逐级省略，始终保留尾部（文件名一侧）；
+ * 全屏最大化时空间充足，会直接展示完整路径。
+ */
+function fitPath(node, full) {
+  const parts = String(full).split('/').filter(Boolean);
+  node.textContent = full;
+  let dropped = 0;
+  while (parts.length - dropped > 1 && node.scrollWidth > node.clientWidth + 1) {
+    dropped += 1;
+    node.textContent = `…/${parts.slice(dropped).join('/')}`;
+  }
 }
 
 function shortPath(p, max = 42) {
@@ -361,6 +398,8 @@ async function renderCode(session) {
   if (needLoad) {
     state.activeFile = file;
     el.codeName.textContent = basename(file);
+    el.codePath.title = file;
+    fitPath(el.codePath, displayPath(file));
     let payload;
     try {
       payload = await Promise.race([
@@ -1284,6 +1323,10 @@ function wireEventsFromMain() {
   });
   window.api.on('roots:updated', (payload) => {
     state.roots = payload.roots || [];
+    if (state.activeFile) {
+      el.codePath.title = state.activeFile;
+      fitPath(el.codePath, displayPath(state.activeFile));
+    }
     renderRoots();
     state.treeCache.clear();
     renderTree().catch(() => {});
@@ -1495,6 +1538,12 @@ window.__PVS_PANEL__ = () => {
     activeFile: state.activeFile,
     activeCodeSession: state.activeCodeSessionId,
     root: state.roots[state.roots.length - 1]?.dir || null,
+    codeHeadRect: (() => {
+      const node = document.querySelector('.code-head');
+      if (!node) return null;
+      const box = node.getBoundingClientRect();
+      return { top: Math.round(box.top), left: Math.round(box.left), width: Math.round(box.width), height: Math.round(box.height) };
+    })(),
     codePane: rect(document.getElementById('code-pane')),
     editorHost: rect(document.getElementById('editor')),
     cmEditor: Boolean(document.querySelector('.cm-editor')),
@@ -1502,6 +1551,21 @@ window.__PVS_PANEL__ = () => {
     cmFirstLine: (document.querySelector('.cm-line') || { textContent: '' }).textContent.slice(0, 60),
     codeName: document.getElementById('code-name').textContent,
     codeLang: document.getElementById('code-lang').textContent,
+    codePath: document.getElementById('code-path').textContent,
+    // 代码区头部三段（文件名 / 类型 / 路径）的几何信息，用于验收路径确实可见且排在类型之后
+    codeHead: ['code-name', 'code-lang', 'code-path'].map((id) => {
+      const node = document.getElementById(id);
+      const box = node.getBoundingClientRect();
+      return {
+        id,
+        text: node.textContent,
+        left: Math.round(box.left),
+        right: Math.round(box.right),
+        width: Math.round(box.width),
+        visible: box.width > 0 && box.right <= window.innerWidth,
+        truncated: node.scrollWidth > node.clientWidth + 1,
+      };
+    }),
     tabs: [...document.querySelectorAll('#tabs .tab')].map((tab) => tab.textContent.trim()),
     sessions: state.sessions.map((session) => ({ id: session.sessionId, kind: session.kind, file: session.file, title: session.title })),
     roots: state.roots,

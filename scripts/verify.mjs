@@ -128,6 +128,52 @@ async function main() {
     console.log('    ↳ 会话：' + JSON.stringify(panel.state.sessions));
   }
 
+  // 代码区头部：文件名 → 类型 → 地址（截图时能看出代码在项目中的位置）
+  const [nameSeg, langSeg, pathSeg] = panel.state.codeHead || [];
+  check(
+    [nameSeg, langSeg, pathSeg].every((seg) => seg && seg.visible),
+    '代码区头部三段（文件名/类型/地址）都可见',
+    (panel.state.codeHead || []).map((seg) => `${seg.id}@${seg.left}–${seg.right}`).join(' · '),
+  );
+  check(
+    nameSeg && langSeg && pathSeg && nameSeg.right <= langSeg.left && langSeg.right <= pathSeg.left,
+    '地址排在文件名与类型之后',
+    `${nameSeg?.text} → ${langSeg?.text} → ${pathSeg?.text}`,
+  );
+  const expectedRel = path.relative(root, codeFile).split(path.sep).join('/');
+  check(
+    pathSeg && pathSeg.text === expectedRel,
+    '地址为项目内相对路径（保留目录层级）',
+    `${pathSeg?.text} vs ${expectedRel}`,
+  );
+
+  // 空间不足时从左侧省略目录，保留文件名一侧
+  // 深路径放在项目内（临时目录），保证文件树根目录不变，用例结束即清理
+  const deepDir = path.join(root, '.aibrowser', 'deep-verify');
+  const deepFile = path.join(deepDir, ...Array.from({ length: 8 }, (_, i) => `level-${i}-nested-directory`), 'deep-target.js');
+  fs.mkdirSync(path.dirname(deepFile), { recursive: true });
+  fs.writeFileSync(deepFile, "const deepTarget = 'ok';\n", 'utf8');
+  await api('openCode', { file: deepFile });
+  const deepPanel = await waitFor(async () => {
+    const s = await api('panelState');
+    return s.state.codePath && s.state.codePath.includes('deep-target.js') ? { ok: true, state: s.state } : null;
+  }, { label: '深路径提示' });
+  const deepPathSeg = (deepPanel.state?.codeHead || [])[2] || {};
+  const deepFullRel = path.relative(root, deepFile).split(path.sep).join('/');
+  check(
+    deepPathSeg.text.startsWith('…/')
+      && deepPathSeg.text.endsWith('deep-target.js')
+      && deepPathSeg.text !== deepFullRel,
+    '长路径从左侧省略且保留文件名',
+    `文本=${JSON.stringify(deepPathSeg.text)}（省略了前 ${deepFullRel.split('/').length - deepPathSeg.text.split('/').length} 段）`,
+  );
+  fs.rmSync(deepDir, { recursive: true, force: true });
+  await api('openCode', { file: codeFile });
+  await waitFor(async () => {
+    const s = await api('panelState');
+    return s.state.codePath === expectedRel ? { ok: true } : { ok: false };
+  }, { label: '恢复项目内文件' });
+
   // 网页预览
   await api('open', { file: htmlFile });
   await sleep(1800);
@@ -359,6 +405,12 @@ async function main() {
   const idleB = await api('panelAction', { action: 'idle-stats' });
   check(idleB.result.layoutSends - idleA.result.layoutSends <= 2, '静置时布局上报不再增长（无重排循环）',
     `1.5s 内 +${idleB.result.layoutSends - idleA.result.layoutSends} 次`);
+
+  // 收尾：把配置恢复成默认状态（失败的一轮不会给下一轮留下关闭的热重载等）
+  await api('panelAction', { action: 'hot-reload', payload: { enabled: true } });
+  await api('panelAction', { action: 'ui-zoom', payload: { factor: 1 } });
+  await api('panelAction', { action: 'content-only', payload: { visible: true } });
+  await sleep(400);
 
   await api('shutdown');
   await sleep(1500);

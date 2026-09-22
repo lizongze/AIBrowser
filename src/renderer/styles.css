@@ -1038,6 +1038,18 @@ body[data-view="console"] #console-pane {
   text-overflow: ellipsis;
 }
 
+/* 代码区头部的完整路径：弱化、可省略 */
+.file-path {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 #editor {
   flex: 1;
   min-height: 0;

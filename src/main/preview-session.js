@@ -9,6 +9,7 @@ const fs = require('node:fs/promises');
 const { BrowserWindow, WebContentsView } = require('electron');
 const { PREVIEW_PARTITION } = require('./preview-protocol');
 const { detectLanguage } = require('./language');
+const { normalizePath } = require('./file-service');
 
 const DEFAULT_WIDTH = 1280;
 const DEFAULT_HEIGHT = 840;
@@ -571,9 +572,14 @@ class PreviewSession {
   async ensureCodePageLoaded({ theme = 'light', wrap = true } = {}) {
     if (this.kind !== 'code' || !this.file) return this;
     if (this._codePageLoaded) return this;
-    const url = `pvs://code/?file=${encodeURIComponent(this.file)}&title=${encodeURIComponent(path.basename(this.file))}&theme=${theme}${wrap ? '' : '&wrap=0'}`;
+    // 归一化后的绝对路径（Windows 上为 D:\\...，WSL 上为 /mnt/...）
+    const file = normalizePath(this.file);
+    const url = `pvs://code/?file=${encodeURIComponent(file)}`
+      + `&title=${encodeURIComponent(path.basename(file))}&theme=${theme}${wrap ? '' : '&wrap=0'}`;
     await this.load({ url });
     this._codePageLoaded = true;
+    // 截图用的临时页面：不要覆盖会话原本的 url/file 语义，避免界面上显示成 pvs://code/
+    this.url = `code://${file}`;
     return this;
   }
 

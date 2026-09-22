@@ -306,12 +306,14 @@ class PreviewManager {
     if (root) this.files.addRoot(root);
 
     const looksLikeUrlText = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || /^about:/i.test(raw);
+    // 注意：非 WSL 平台 normalizePath 是对同一路径取“规范形式”（非 no-op），
+    // Windows 上也会得到稳定形式（如 D:\gitData\...），比原始输入更可靠。
     const candidate = normalizePath(raw);
     const abs = path.isAbsolute(candidate) ? candidate : path.resolve(candidate);
     const exists = fs.existsSync(abs);
 
     if (exists) {
-      // 目录 → 其 index.html
+      // 目录 → 其 index.html；file 始终用归一化后的绝对路径（Windows 路径此时已转成 /mnt/d/...）
       let file = abs;
       if (fs.statSync(abs).isDirectory()) {
         const index = path.join(abs, 'index.html');

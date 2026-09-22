@@ -440,13 +440,67 @@ class ControlServer {
 
       case 'screenshot': {
         const session = manager.resolve(params.sessionId);
-        // 代码会话会在 screenshot() 内部先把代码渲染成网页，因此这里不再拦截
+        // 代码会话在 GUI 下优先「截面板」：包含标签条与行号栏，和用户看到的画面一致；
+        // 无头模式没有面板，则退回 screenshot() 内部的代码页渲染。
+        if (session.kind === 'code' && session.file && manager.guiWindow && !manager.guiWindow.isDestroyed()) {
+          const win = manager.guiWindow;
+          try {
+            // 让面板聚焦到该代码会话，并切到代码视图（否则可能截到网页视图）
+            manager.setFocus(session.id);
+            this.broadcast('ui:focus', { sessionId: session.id, view: 'code' });
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            const focusBounds = session.view ? session.view.getBounds() : null;
+            if (focusBounds && typeof session.view.setVisible === 'function') session.view.setVisible(false);
+            // Windows 上隐藏/最小化的窗口 capturePage 会返回空帧；这里确保窗口可见后重试
+            try {
+              if (win.isMinimized()) win.restore();
+              if (!win.isVisible()) win.showInactive();
+            } catch {
+              /* ignore */
+            }
+            // 隐藏/显示原生视图会改变合成布局，必须等合成器刷新后再截，否则拿到空帧
+            await new Promise((resolve) => setTimeout(resolve, 350));
+            let image = await win.webContents.capturePage();
+            if (!image || image.isEmpty() || image.getSize().width === 0) {
+              await new Promise((resolve) => setTimeout(resolve, 350));
+              image = await win.webContents.capturePage();
+            }
+            if (focusBounds && typeof session.view.setVisible === 'function') session.view.setVisible(true);
+            if (image && !image.isEmpty()) {
+              const data = (params.format === 'jpeg') ? image.toJPEG(params.quality ?? 85) : image.toPNG();
+              const size = image.getSize();
+              const result = {
+                sessionId: session.id,
+                format: params.format === 'jpeg' ? 'jpeg' : 'png',
+                width: size.width,
+                height: size.height,
+                bytes: data.length,
+                dataBase64: data.toString('base64'),
+                buffer: data,
+                image,
+                source: 'panel',
+              };
+              if (params.out !== undefined && params.out !== null) {
+                const out = params.out ? path.resolve(String(params.out)) : path.join(os.tmpdir(), `pvs-panel-${session.id}-${Date.now()}.png`);
+                await fsp.mkdir(path.dirname(out), { recursive: true });
+                await fsp.writeFile(out, data);
+                result.filePath = out;
+              }
+              return result;
+            }
+          } catch {
+            /* 面板截图失败才退回代码页渲染 */
+          }
+        }
+        const urlBefore = session.url;
         const shot = await session.screenshot({
           format: params.format || 'png',
           quality: params.quality,
           fullPage: Boolean(params.fullPage ?? params.full_page),
           selector: params.selector,
         });
+        // 代码会话回退到代码页截图后，恢复到原本的会话标识，界面不应显示成 pvs://code/
+        if (session.kind === 'code' && urlBefore) session.url = urlBefore;
         const result = { sessionId: shot.sessionId, format: shot.format, width: shot.width, height: shot.height, bytes: shot.bytes };
         if (params.raw) return { ...result, buffer: shot.buffer };
         if (params.out !== undefined || params.out === null) {
@@ -688,8 +742,23 @@ class ControlServer {
             panelShot = { error: err.message };
           }
         }
+        let windowState = null;
+        if (win && !win.isDestroyed()) {
+          try {
+            windowState = {
+              visible: win.isVisible(),
+              minimized: win.isMinimized(),
+              focused: win.isFocused(),
+              bounds: win.getBounds(),
+              contentSize: win.getContentSize(),
+            };
+          } catch (err) {
+            windowState = { error: err.message };
+          }
+        }
         return {
           mode: this.mode,
+          windowState,
           windowSize,
           slot,
           reportedBounds: bounds,
