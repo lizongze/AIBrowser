@@ -1052,6 +1052,29 @@ function wireEvents() {
     toast(`已切换到${state.theme === 'dark' ? '深色' : '浅色'}主题`, 'info', 1400);
   });
 
+  // Ctrl+V 兜底：不依赖应用菜单的 accelerator（实测菜单 role 存在时 Ctrl+V 仍可能不生效），
+  // 直接在捕获阶段读取剪贴板并插入到光标处；Shift+Insert 等其它路径不受影响。
+  window.addEventListener('keydown', async (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+    if (event.key !== 'v' && event.key !== 'V') return;
+    const target = event.target;
+    const editable = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+    if (!editable) return; // 编辑器（CodeMirror）自己会处理
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      const clip = await window.api.ui.clipboardDiag({});
+      const text = String(clip.text || '');
+      if (!text) return;
+      const start = target.selectionStart ?? target.value.length;
+      const end = target.selectionEnd ?? start;
+      target.setRangeText(text, start, end, 'end');
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+    } catch (err) {
+      toast(`粘贴失败：${err.message}`, 'error');
+    }
+  }, true);
+
   // Ctrl + 滚轮：缩放界面（面板整体）
   window.addEventListener('wheel', (event) => {
     if (!event.ctrlKey && !event.metaKey) return;
@@ -1391,6 +1414,18 @@ window.__PVS_ACTION__ = (action, payload = {}) => {
         title: pick('.app-name'),
         hint: pick('.empty-sub'),
       };
+    }
+    case 'press-paste': {
+      const target = document.getElementById(payload.target || 'address') || document.activeElement || document.body;
+      if (target.focus) target.focus();
+      target.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'v', code: 'KeyV', ctrlKey: true, bubbles: true, cancelable: true,
+      }));
+      return { fired: true, target: (target.id || target.tagName), value: String(target.value || '').slice(0, 50) };
+    }
+    case 'clipboard-diag': {
+      // 诊断：从渲染进程侧读剪贴板（浏览器 API）并报告
+      return window.api.ui.clipboardDiag(payload || {}).then((r) => ({ ipc: r })).catch((e) => ({ error: String(e.message || e) }));
     }
     case 'idle-stats': return {
       // 布局上报累计次数：静置时应停止增长（持续增长说明存在重排循环）

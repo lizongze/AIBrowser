@@ -42,6 +42,7 @@ const api = {
     zoom: (factor) => invoke('ui:zoom', typeof factor === 'number' ? { factor } : {}),
     hotReload: (enabled) => invoke('ui:hotReload', { enabled }),
     setContentOnly: (enabled) => invoke('ui:contentOnly', { enabled }),
+    clipboardDiag: (payload) => invoke('ui:clipboard', payload || {}),
     zoomBy: (delta) => invoke('ui:zoom', { delta }),
     layout: (payload) => invoke('ui:layout', payload),
     activeView: (sessionId) => invoke('ui:activeView', { sessionId }),

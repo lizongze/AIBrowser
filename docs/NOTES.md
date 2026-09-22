@@ -156,6 +156,17 @@ electron . --hot-reload          # 启动时开启（与配置一起生效，参
 mkdir -p ~/.fonts && cp /mnt/c/Windows/Fonts/msyh.ttc /mnt/c/Windows/Fonts/simhei.ttf ~/.fonts/ && fc-cache -f ~/.fonts
 ```
 
+## 在 Windows 上的启动方式与剪贴板
+
+| 启动方式 | 说明 |
+| --- | --- |
+| **`run-native.cmd`（推荐）** | 走 `scripts/run-native.ps1`，以「继承当前环境 + 剔除 WSL/Linux 变量」的方式启动，剪贴板与 Windows 集成正常 |
+| `start-windows.cmd` | 从 WSL 调用时会继承 `WSLENV` / `DISPLAY` / `PULSE_SERVER` 等变量并安装依赖；仅建议首次装依赖时用 |
+
+面板菜单包含完整的「编辑」子菜单，并**显式写出加速键**（`Ctrl+X/C/V`、`Ctrl+A`、`Ctrl+Z` 等）——
+只写 `role` 不写 `accelerator` 时，部分平台上加速键不会注册，表现为「Ctrl+V 粘贴没反应」
+（此时 `Shift+Insert` 仍可用）。渲染层另有一层 Ctrl+V 兜底：捕获阶段读剪贴板并插入光标处。
+
 ## 诊断过的非问题（避免重复排查）
 
 | 现象 | 结论 |

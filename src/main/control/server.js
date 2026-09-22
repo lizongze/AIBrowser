@@ -549,7 +549,12 @@ class ControlServer {
         if (!params.action) throw new Error('panelAction 需要 action 参数');
         const source = JSON.stringify(String(params.action));
         const payload = JSON.stringify(params.payload || {});
-        const code = 'JSON.stringify(window.__PVS_ACTION__(' + source + ', ' + payload + ') || {})';
+        // 动作可能返回 Promise（例如读取剪贴板），这里统一 await 后再序列化
+        const code = '(async () => {'
+          + ' try { const r = await window.__PVS_ACTION__(' + source + ', ' + payload + ');'
+          + ' return JSON.stringify(r === undefined ? {} : r); }'
+          + ' catch (e) { return JSON.stringify({ error: String(e && e.message ? e.message : e) }); }'
+          + ' })()';
         const raw = await Promise.race([
           win.webContents.executeJavaScript(code, true),
           new Promise((_resolve, reject) => setTimeout(() => reject(new Error('panelAction 超时')), 10000)),

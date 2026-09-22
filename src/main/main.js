@@ -315,6 +315,18 @@ function registerIpc() {
     return { factor: next, saved: saved.uiScale };
   });
 
+  // 剪贴板读写（渲染层 Ctrl+V 兜底会用到；也可用于脚本/诊断）
+  handle('ui:clipboard', (payload) => {
+    const { clipboard } = require('electron');
+    if (payload && payload.action === 'write') {
+      clipboard.writeText(String(payload.text || ''));
+      return { ok: true, wrote: payload.text };
+    }
+    const formats = clipboard.availableFormats();
+    const text = clipboard.readText();
+    return { formats, textLength: text.length, textPreview: text.slice(0, 60), text };
+  });
+
   handle('ui:contentOnly', (payload) => {
     const enabled = payload.enabled !== false;
     config.write({ contentOnly: enabled });
@@ -395,6 +407,26 @@ function buildMenu() {
         { type: 'separator' },
         { label: '关闭标签', accelerator: 'CmdOrCtrl+W', click: () => broadcast('ui:command', { command: 'close-tab' }) },
         { role: 'quit', label: '退出' },
+      ],
+    },
+    {
+      label: '编辑',
+      submenu: [
+        // 关键：Windows/Linux 上 Chromium 的剪贴板快捷键依赖菜单 role 注册，
+        // 自定义菜单若不含这些 role，Ctrl+C / Ctrl+V / Ctrl+X 会完全失效
+        // （实测表现为「Ctrl+V 粘贴没反应」）。
+        // 显式写出 accelerator：仅靠 role 推导在部分平台上不会注册加速键，
+        // 结果就是 Ctrl+V 没反应（实测）。同时记录一次调用，便于确认是否被触发。
+        { role: 'undo', label: '撤销', accelerator: 'CmdOrCtrl+Z' },
+        { role: 'redo', label: '重做', accelerator: 'CmdOrCtrl+Shift+Z' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切', accelerator: 'CmdOrCtrl+X' },
+        { role: 'copy', label: '复制', accelerator: 'CmdOrCtrl+C' },
+        { role: 'paste', label: '粘贴', accelerator: 'CmdOrCtrl+V' },
+        { role: 'pasteAndMatchStyle', label: '粘贴为纯文本', accelerator: 'CmdOrCtrl+Shift+V' },
+        { role: 'delete', label: '删除' },
+        { type: 'separator' },
+        { role: 'selectAll', label: '全选', accelerator: 'CmdOrCtrl+A' },
       ],
     },
     {
