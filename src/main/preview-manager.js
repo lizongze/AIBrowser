@@ -44,60 +44,6 @@ class PreviewManager {
     return this.hotReload;
   }
 
-  /**
-   * 预热：启动时用一个隐藏会话**真渲染一帧**，然后销毁。
-   * 实测 Windows 下 Chromium 的首次合成/光栅化要 ~2s（网络栈其实是热的：DNS 26ms、
-   * TLS 38ms、TTFB 49ms），把这份一次性开销挪到启动后台做掉，首个标签就能接近秒出。
-   */
-  prewarm() {
-    if (process.env.AIBROWSER_NO_PREWARM === '1') return;
-    if (this._prewarmed) return;
-    this._prewarmed = true;
-    try {
-      const warm = new PreviewSession({
-        files: this.files,
-        host: 'offscreen',
-        hotReload: false,
-        ...this.prewarmHooks(),
-      });
-      warm.ensureHost(); // 宿主是惰性创建的，必须显式建出来
-      const start = Date.now();
-      // 用带内容的页面触发首次布局、绘制与光栅化
-      const warmHtml = 'data:text/html;charset=utf-8,'
-        + encodeURIComponent('<body style="font:13px sans-serif">'
-          + '<h1>warmup</h1><p>' + 'prewarm '.repeat(200) + '</p>'
-          + '<div style="width:400px;height:200px;background:linear-gradient(45deg,#4c8dff,#a371f7)"></div>'
-          + '</body>');
-      warm.webContents.loadURL(warmHtml)
-        .then(() => warm.grabFrame().catch(() => null))
-        .catch(() => null)
-        .finally(() => {
-          process.stderr.write(`[aibrowser] 渲染预热完成（${Date.now() - start}ms）\n`);
-          setTimeout(() => {
-            try {
-              warm.destroy();
-            } catch {
-              /* ignore */
-            }
-          }, 800);
-        });
-    } catch (err) {
-      process.stderr.write(`[aibrowser] 预热失败（不影响使用）：${err.message}\n`);
-    }
-  }
-
-  /** 预热会话用的空回调（不需要广播事件） */
-  prewarmHooks() {
-    return {
-      urlForFile: () => null,
-      onPopup: () => {},
-      onConsole: () => {},
-      onNetwork: () => {},
-      onChange: () => {},
-      captureSession: () => {},
-    };
-  }
-
   setGuiWindow(win) {
     this.guiWindow = win;
     this.host = 'view';
