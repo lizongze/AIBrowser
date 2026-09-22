@@ -53,8 +53,16 @@ if (!app.commandLine.hasSwitch('font-render-hinting')) {
   app.commandLine.appendSwitch('font-render-hinting', 'medium');
 }
 if (!app.commandLine.hasSwitch('no-sandbox')) app.commandLine.appendSwitch('no-sandbox');
-if (!app.commandLine.hasSwitch('disable-gpu')) app.commandLine.appendSwitch('disable-gpu');
 if (!app.commandLine.hasSwitch('disable-dev-shm-usage')) app.commandLine.appendSwitch('disable-dev-shm-usage');
+// GPU：默认仍走 Chromium 自己的判断。用户显式传了 GPU 相关开关时不再强制关闭，
+// 否则 --enable-gpu-rasterization / --ignore-gpu-blocklist 这类参数会被 --disable-gpu 抹掉。
+const gpuRelated = ['enable-gpu-rasterization', 'ignore-gpu-blocklist', 'enable-unsafe-swiftshader', 'use-gl', 'use-angle', 'enable-zero-copy'];
+const userWantsGpu = gpuRelated.some((name) => app.commandLine.hasSwitch(name))
+  // 双保险：hasSwitch 在某些传递路径下检测不到，直接看原始 argv
+  || rawArgv.some((arg) => gpuRelated.some((name) => arg === `--${name}` || arg.startsWith(`--${name}=`)));
+if (!userWantsGpu && !app.commandLine.hasSwitch('disable-gpu')) {
+  app.commandLine.appendSwitch('disable-gpu');
+}
 
 const { FileService } = require('./file-service');
 const { PreviewManager } = require('./preview-manager');
@@ -488,6 +496,17 @@ async function bootstrap() {
     registerIpc();
     buildMenu();
     createWindow();
+  }
+
+  // GPU 状态（便于确认硬件加速是否真的生效）
+  try {
+    const gpu = app.getGPUFeatureStatus();
+    process.stderr.write(
+      `[aibrowser] GPU 合成=${gpu.gpu_compositing} 光栅化=${gpu.rasterization}`
+      + ` WebGL=${gpu.webgl} 视频解码=${gpu.video_decode}\n`,
+    );
+  } catch {
+    /* 某些平台不支持 */
   }
 
   // 守护进程把连接信息打到 stderr，便于脚本读取
