@@ -835,8 +835,7 @@ async function openTarget(value, mode) {
   const __t0 = performance.now();
   state.openTiming = [];
   const __mark = (label) => {
-    const ms = Math.round(performance.now() - __t0);
-    state.openTiming.push(`${label} ${ms}ms`);
+    state.openTiming.push(`${label} ${Math.round(performance.now() - __t0)}ms`);
   };
   try {
     // 本地存在的路径优先（避免 README.md / package.json 被当成域名）

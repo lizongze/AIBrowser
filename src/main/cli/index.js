@@ -107,7 +107,9 @@ async function commandOpen(args, flags) {
     params.file = target.file;
     if (flags.root) params.root = path.resolve(String(flags.root));
   }
-  const result = await send(flags.mode === 'code' ? 'openCode' : 'openPath', params, { state, timeoutMs: 30000 });
+  // URL 走 open 动作；本地路径走 openPath（目录会找 index.html）或 openCode
+  const action = target.kind === 'url' ? 'open' : flags.mode === 'code' ? 'openCode' : 'openPath';
+  const result = await send(action, params, { state, timeoutMs: 30000 });
   if (flags.json) {
     jsonOut({ ok: true, spawned, ...result });
   } else {
