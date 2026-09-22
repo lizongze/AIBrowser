@@ -125,9 +125,9 @@ function detectScaleFactor(explicit = null) {
 
 /**
  * WSLg 下建议的渲染缩放。
- * 取 1.5 的依据：WSLg 会把 devicePixelRatio 报成 2.25（偏大），而笔记本屏是
- * 1536 逻辑 / 2304 物理 = 150%。用 1.5 时窗口缓冲区 ≈ 物理像素，呈现层不必再缩放；
- * 用 1.25 则还需要额外的 1.2 倍小数重采样，笔画会发虚。
+ * 取 1.25 的依据：WSLg 会把 devicePixelRatio 报成 2.25（偏大）。1.5 虽然更接近
+ * 屏幕物理像素，但界面字号会明显偏大；1.25 观感更合适（Windows 原生运行时不套用此值，
+ * 由系统缩放决定）。需要更大可用 --scale-factor 1.5。
  */
 function wslgRecommendedScale() {
   // 只在 WSLg 下纠正：Windows 原生运行会自己读系统缩放（150% 等），
@@ -139,7 +139,7 @@ function wslgRecommendedScale() {
     const value = Number(configured);
     if (Number.isFinite(value) && value > 0) return value;
   }
-  return isWsl() ? 1.5 : null;
+  return isWsl() ? 1.25 : null;
 }
 
 module.exports = { detectScaleFactor, wslgRecommendedScale, isWsl, physicalWidth, windowsLogicalWidth };

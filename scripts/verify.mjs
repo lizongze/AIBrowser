@@ -213,6 +213,27 @@ async function main() {
   fs.writeFileSync(htmlFile, originalHtml);
   check(stillOld.value === 'false', '关闭后改文件不再刷新');
 
+  // 新标签页里回车打开目标：必须消耗空标签，不能多出一个
+  await api('panelAction', { action: 'new-tab' });
+  await sleep(400);
+  const beforeEnter = await api('panelState');
+  const beforeCount = beforeEnter.state.tabs.length;
+  await api('panelAction', { action: 'type-address', payload: { value: 'README.md' } });
+  await waitFor(async () => {
+    const state = await api('panelState');
+    return state.state.tabs.some((tab) => tab.includes('README.md')) ? { ok: true } : { ok: false };
+  }, { label: '回车打开 README' });
+  const afterEnter = await api('panelState');
+  // 要求：不残留「刚建的那个空标签」，也不因回车多出额外标签
+  const draftsBefore = beforeEnter.state.tabs.filter((t) => t.includes('新标签页')).length;
+  const draftsAfter = afterEnter.state.tabs.filter((t) => t.includes('新标签页')).length;
+  check(draftsAfter <= draftsBefore && afterEnter.state.tabs.some((t) => t.includes('README.md')),
+    '在新标签页回车后不会残留空标签',
+    `空标签 ${draftsBefore} → ${draftsAfter}，标签数 ${beforeCount} → ${afterEnter.state.tabs.length}`);
+
+  // 相对路径（含点号）不应被误判成域名
+  check(afterEnter.state.tabs.some((tab) => tab.includes('README.md')), '相对路径按本地文件打开而非域名');
+
   // 全屏预览：默认就是开启的（隐藏标题栏与工具栏，只留标签条）
   await api('openPath', { path: htmlFile });
   await waitFor(async () => {

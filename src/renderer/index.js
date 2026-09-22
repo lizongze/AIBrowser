@@ -683,11 +683,13 @@ async function activateSession(id, { force = false } = {}) {
   // 幂等守卫：同一会话、同一视图、且代码文件已经装载完毕时才跳过重复渲染。
   // 只比 sessionId 不行 —— 装载是异步的，中途重复触发会把渲染吃掉，编辑器就一直空着。
   const fileLoaded = !isCode || state.activeCodeSessionId === id;
-  if (!force && state.activeId === id && state.view === targetView && fileLoaded) {
+  // 注意：幂等守卫里不能忽略「还有聚焦中的空标签」这一情况 ——
+  // 否则在新标签页里打开目标时，会话被激活但空标签没被消耗，界面上就多出一个标签页。
+  if (!force && !state.activeDraft && state.activeId === id && state.view === targetView && fileLoaded) {
     return;
   }
   state.activeId = id;
-  // 打开真实会话后，当前聚焦的空标签让位（其它空标签保留）
+  // 打开真实会话后，聚焦中的空标签让位（其它空标签保留）
   if (state.activeDraft) {
     state.drafts = state.drafts.filter((item) => item !== state.activeDraft);
     state.activeDraft = null;
@@ -818,7 +820,10 @@ async function openTarget(value, mode) {
   if (!text) return;
   setStatus(`打开中 ${shortPath(text, 30)}…`, 'busy');
   try {
-    if (looksLikeUrl(text)) {
+    // 本地存在的路径优先（避免 README.md / package.json 被当成域名）
+    const localStat = looksLikeUrl(text) ? await window.api.files.stat(text).catch(() => null) : null;
+    const treatAsPath = !looksLikeUrl(text) || (localStat && localStat.exists);
+    if (!treatAsPath) {
       const result = await window.api.sessions.open({ url: text });
       await refreshSessions();
       await activateSession(result.sessionId);
@@ -946,14 +951,9 @@ function wireEvents() {
     const session = sessionById(state.activeId);
     const value = el.address.value.trim();
     if (!value) return;
-    if (session && session.kind !== 'code') {
-      window.api.sessions.navigate(session.sessionId, looksLikeUrl(value) ? { url: value } : { file: value })
-        .then(() => refreshSessions())
-        .catch((err) => toast(err.message, 'error'));
-    } else {
-      const codeLike = !looksLikeUrl(value) && /\.(html?|xhtml|svg)$/i.test(value) === false;
-      openTarget(value, codeLike ? 'code' : 'web');
-    }
+    // 先看是不是本地已存在的路径：README.md、package.json 这类含点号的相对路径
+    // 会被 URL 正则误判成域名，必须优先按路径处理。
+    openTarget(value, /\.(html?|xhtml|svg)$/i.test(value) ? 'web' : 'code');
   });
   el.navBack.addEventListener('click', () => state.activeId && window.api.sessions.back(state.activeId).then(() => refreshSessions()));
   el.navForward.addEventListener('click', () => state.activeId && window.api.sessions.forward(state.activeId).then(() => refreshSessions()));
@@ -1342,6 +1342,13 @@ window.__PVS_ACTION__ = (action, payload = {}) => {
     }
     case 'save': saveActiveCode(); return { saving: true };
     case 'toggle-console': toggleConsole(); return { view: state.view };
+    case 'type-address': {
+      // 还原用户操作：在地址栏填入内容并回车
+      el.address.value = String(payload.value || '');
+      el.address.focus();
+      el.address.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      return { value: el.address.value };
+    }
     case 'hot-reload': setHotReload(payload.enabled, { notify: payload.notify !== false }); return { hotReload: state.hotReload };
     case 'content-only': toggleContentOnly(payload.visible); return { contentOnly: state.contentOnly };
     case 'ui-zoom': applyUiScale(payload.factor, { persist: false }); return { uiScale: state.uiScale };
