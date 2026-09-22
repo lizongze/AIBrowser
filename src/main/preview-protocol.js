@@ -162,6 +162,32 @@ function registerHandler(deps) {
     try {
       const url = new URL(request.url);
       const rootId = url.hostname || url.host;
+
+      // 代码页：把代码文件渲染成可截图的高亮页面（代码会话本身没有网页图层）
+      if (rootId === 'code') {
+        const file = url.searchParams.get('file');
+        if (!file) {
+          return new Response(errorPage(400, 'Bad Request', '缺少 file 参数'), {
+            status: 400, headers: { 'content-type': 'text/html; charset=utf-8' },
+          });
+        }
+        const { renderCodePage } = require('./code-preview');
+        try {
+          const page = renderCodePage({
+            file,
+            title: url.searchParams.get('title') || undefined,
+            theme: url.searchParams.get('theme') === 'dark' ? 'dark' : 'light',
+            wrap: url.searchParams.get('wrap') !== '0',
+          });
+          return new Response(page.html, {
+            status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+          });
+        } catch (err) {
+          return new Response(errorPage(404, 'Not Found', `${file}\n${err.message}`), {
+            status: 404, headers: { 'content-type': 'text/html; charset=utf-8' },
+          });
+        }
+      }
       const resolved = await deps.files.resolveInRoot(rootId, url.pathname);
       if (!resolved) {
         return new Response(errorPage(404, 'Not Found', `pvs://${rootId}${url.pathname}`), {

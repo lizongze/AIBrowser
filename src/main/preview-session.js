@@ -563,7 +563,23 @@ class PreviewSession {
     );
   }
 
+  /**
+   * 代码会话截图：先把代码渲染成网页（pvs://code/），再正常截。
+   * 代码会话本身只有编辑器 DOM，没有网页图层；这一层让「代码也能截图」，
+   * 且 GUI 与无头两种模式行为一致。
+   */
+  async ensureCodePageLoaded({ theme = 'light', wrap = true } = {}) {
+    if (this.kind !== 'code' || !this.file) return this;
+    if (this._codePageLoaded) return this;
+    const url = `pvs://code/?file=${encodeURIComponent(this.file)}&title=${encodeURIComponent(path.basename(this.file))}&theme=${theme}${wrap ? '' : '&wrap=0'}`;
+    await this.load({ url });
+    this._codePageLoaded = true;
+    return this;
+  }
+
   async screenshot({ format = 'png', quality, fullPage = false, selector } = {}) {
+    // 代码会话先把代码渲染成页面，之后走同一条截图链路
+    await this.ensureCodePageLoaded({});
     await this.ensureLoaded();
     this.requireHost();
     if (selector) {

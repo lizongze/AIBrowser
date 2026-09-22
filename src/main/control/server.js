@@ -439,8 +439,8 @@ class ControlServer {
       }
 
       case 'screenshot': {
-        const session = manager.resolve(params.sessionId, { requireWeb: true });
-        if (session.kind === 'code') throw new Error('代码会话没有网页图层，无法截图；请用网页会话或先 open 一个 HTML');
+        const session = manager.resolve(params.sessionId);
+        // 代码会话会在 screenshot() 内部先把代码渲染成网页，因此这里不再拦截
         const shot = await session.screenshot({
           format: params.format || 'png',
           quality: params.quality,

@@ -57,8 +57,9 @@ $P shot --selector ".card" --out /tmp/card.png --json
 $P console --json
 $P network --on && $P reload && $P network --json
 
-# 代码文件预览（高亮，不做网页渲染）
+# 代码文件预览（高亮）
 $P code ./src/app.ts --line 42 --json
+$P shot --out /tmp/app.png --full-page --json    # 代码文件也能截图（内部渲染成高亮页面）
 ```
 
 ## 批量处理清单（推荐）

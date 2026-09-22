@@ -147,6 +147,19 @@ electron . --hot-reload          # 启动时开启（与配置一起生效，参
 状态持久化在运行时目录的 `config.json`（`hotReload`）。可用 `--no-hot-reload` 关闭，或 `--hot-reload` 强制开启。
 开启后每 0.6s 轮询被预览文件所在目录中的 `html/css/js/json/svg/md`，变化即自动刷新页面。
 
+## 代码文件截图
+
+代码会话没有网页图层（只有编辑器 DOM），所以早期在无头模式下无法截图。现在 `screenshot()`
+会先把代码渲染成 `pvs://code/?file=<绝对路径>`（highlight.js 高亮 + 顶部信息条：文件名 · 语言 · 行数 · 大小），
+再走同一条 Chromium 截图链路：
+
+```bash
+pvs open README.md && pvs shot --out /tmp/readme.png --full-page
+pvs batch README.md src/main/main.js --out ./shots      # 批量里代码文件同样支持
+```
+
+`eval` / `content` / `network` 仍只对网页会话有效（代码会话没有真实网页）。
+
 ## WSL / 容器兼容
 
 已内置 `--no-sandbox`、`--disable-gpu`、`--disable-dev-shm-usage`，无需手工配置。

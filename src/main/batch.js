@@ -200,7 +200,7 @@ async function runBatch(opts) {
           force: item.force,
           root: item.root,
         });
-        if (opened.kind === 'code') throw new Error('该目标按代码预览处理，无法网页截图（可加 force:"web"）');
+        // 代码会话也能截图：screenshot() 内部会先把代码渲染成 pvs://code/ 页面
         session = opened.session;
       } else {
         await session.load(item.target ? { url: item.target } : item.url ? { url: item.url } : { file: item.file });
