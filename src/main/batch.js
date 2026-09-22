@@ -10,6 +10,35 @@ const { normalizePath } = require('./file-service');
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
 const DEFAULT_TIMEOUT = 20000;
 
+
+/** 调整会话视口以影响截图尺寸；返回原尺寸以便恢复 */
+function applyViewport(session, viewport, { resize = false } = {}) {
+  try {
+    const target = { ...DEFAULT_VIEWPORT, ...(viewport || {}) };
+    if (session.host === 'view') {
+      // 面板里的会话尺寸由窗口决定，无法逐个改；记录一下供报告使用
+      return null;
+    }
+    if (!session.window || session.window.isDestroyed()) return null;
+    const [w, h] = session.window.getContentSize();
+    if (!resize && w === target.width && h === target.height) return [w, h];
+    session.window.setContentSize(target.width, target.height);
+    return [w, h];
+  } catch {
+    return null;
+  }
+}
+
+/** 恢复视口尺寸 */
+function restoreViewport(session, saved) {
+  if (!saved) return;
+  try {
+    if (session.window && !session.window.isDestroyed()) session.window.setContentSize(saved[0], saved[1]);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 把 URL/路径转成安全的文件名片段 */
 function safeName(input) {
   let text = String(input || '').trim();
@@ -178,13 +207,9 @@ async function runBatch(opts) {
         await session.load(item.url ? { url: item.url } : { file: item.file });
       }
 
-      // 设置视口（影响截图尺寸）
+      // 视口：仅对「非整页」截图的宽度有意义；整页截图会自动扩展到全页高度
       const viewport = { ...DEFAULT_VIEWPORT, ...(item.viewport || {}) };
-      if (session.host === 'view') {
-        // 面板会话尺寸由窗口决定，不改
-      } else if (session.window && !session.window.isDestroyed()) {
-        session.window.setContentSize(viewport.width, viewport.height);
-      }
+      const savedSize = applyViewport(session, viewport);
 
       consoleBefore = session.consoleEntries.length;
 
@@ -193,13 +218,31 @@ async function runBatch(opts) {
 
       await waitReady(session, item, timeout);
 
-      const shot = await session.screenshot({
-        format: item.format || format,
-        fullPage: item.fullPage !== undefined ? Boolean(item.fullPage) : fullPage,
-      });
-      const ext = shot.format === 'jpeg' ? 'jpg' : 'png';
-      const imagePath = path.join(outAbsolute, `${String(index).padStart(3, '0')}-${name}.${ext}`);
-      await fsp.writeFile(imagePath, shot.buffer);
+      // 默认**只出一张整页图**；只有显式给 item.viewports（数组）时才多尺寸
+      const wantFullPage = item.fullPage !== undefined ? Boolean(item.fullPage) : fullPage;
+      const viewports = Array.isArray(item.viewports) && item.viewports.length
+        ? item.viewports
+        : [item.viewport || null];
+      const ext = (item.format || format) === 'jpeg' ? 'jpg' : 'png';
+      const images = [];
+      for (let v = 0; v < viewports.length; v += 1) {
+        if (viewports[v]) applyViewport(session, viewports[v], { resize: true });
+        const shot = await session.screenshot({
+          format: item.format || format,
+          fullPage: wantFullPage,
+        });
+        const suffix = viewports.length > 1 ? `-${(viewports[v] && viewports[v].width) || 'auto'}` : '';
+        const imagePath = path.join(outAbsolute, `${String(index).padStart(3, '0')}-${name}${suffix}.${ext}`);
+        await fsp.writeFile(imagePath, shot.buffer);
+        images.push({
+          path: imagePath,
+          width: shot.width,
+          height: shot.height,
+          bytes: shot.bytes,
+          fullPage: wantFullPage,
+        });
+      }
+      restoreViewport(session, savedSize);
 
       let content = null;
       if (item.content) {
@@ -223,10 +266,12 @@ async function runBatch(opts) {
         ok: true,
         title: session.title,
         url: session.info().url,
-        image: imagePath,
-        width: shot.width,
-        height: shot.height,
-        bytes: shot.bytes,
+        image: images[0].path,
+        images,
+        width: images[0].width,
+        height: images[0].height,
+        bytes: images[0].bytes,
+        fullPage: wantFullPage,
         elapsedMs: Date.now() - itemStarted,
         consoleErrors,
         ...(content === null ? {} : { content }),

@@ -81,7 +81,9 @@ $P batch --dir ./site --ext html                   # 收集目录下的 HTML
 ```
 
 每项可用字段：`url` / `file` / `root` / `name` / `fullPage` / `waitFor`（等待选择器）/ `waitMs` /
-`content`（额外抽取文本）/ `viewport` / `skip`。
+`content`（额外抽取文本）/ `viewport` / `viewports`（多尺寸，默认不用）/ `skip`。
+
+**默认每项只出一张整页图**，不要主动传 `viewports`；只有用户明确要求多种屏幕尺寸时才用。
 
 结果是一份清单：`<out>/report.json`（每项含 `image` 路径、`width`/`height`、`title`、可选 `content`、
 `consoleErrors`、`elapsedMs`），以及 `report.jsonl` 便于流式读取。

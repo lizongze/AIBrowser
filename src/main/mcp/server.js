@@ -49,7 +49,12 @@ const ITEM_SCHEMA = {
         viewport: {
           type: 'object',
           properties: { width: { type: 'number' }, height: { type: 'number' } },
-          description: '截图尺寸，默认 1280×800',
+          description: '单尺寸截图视口，默认 1280×800（一般不用传）',
+        },
+        viewports: {
+          type: 'array',
+          items: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } } },
+          description: '仅当用户明确要求多种屏幕尺寸时才传：每个尺寸出一张图',
         },
         skip: { type: 'boolean', description: '跳过该项' },
       },
@@ -72,7 +77,7 @@ const TOOLS = [
   },
   {
     name: 'browser_batch',
-    description: '批量：给一份 URL/文件清单，串行逐个打开并截图，返回结果清单（每项含截图路径、尺寸与可选文本）。适合「一次处理很多页面」而非逐个调用。',
+    description: '批量：给一份 URL/文件清单，串行逐个打开并截图，返回结果清单（每项含截图路径、尺寸与可选文本）。默认每项只出一张整页图；只有用户明确要求多尺寸时才在项里加 viewports。适合「一次处理很多页面」而非逐个调用。',
     inputSchema: {
       type: 'object',
       properties: {

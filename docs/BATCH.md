@@ -46,15 +46,18 @@ pvs batch --dir ./site --ext html
 | `name` | 输出名（缺省由 URL/路径推导，会做文件名安全化） |
 | `waitFor` | 等待该 CSS 选择器出现后再截图 |
 | `waitMs` | 额外固定等待（毫秒） |
-| `fullPage` | 整页截图（默认 true） |
+| `fullPage` | 整页截图（**默认 true**） |
 | `format` | `png`（默认）或 `jpeg` |
 | `content` | 额外提取该选择器的可见文本，写入结果清单 |
-| `viewport` | `{width,height}` 指定截图尺寸（默认 1280×800） |
+| `viewports` | **只有显式给出时才多尺寸**：`[{width,height}, …]`，每项出一张图（文件名带宽度后缀） |
+| `viewport` | `{width,height}` 单尺寸（默认 1280×800，主要影响非整页图的宽度） |
 | `skip` | 跳过该项（便于临时剔除） |
 
 ## 输出
 
-- 截图写到 `--out <dir>`（默认 `./aibrowser-shots`），命名 `NNN-<name>.<ext>`
+- **默认每项只出一张整页图**（`fullPage: true`），命名 `NNN-<name>.<ext>`；
+  只有显式传 `viewports: [{width,height}, …]` 才会按多种尺寸各出一张（`NNN-<name>-<宽>.<ext>`）
+- 截图写到 `--out <dir>`（默认 `./aibrowser-shots`）
 - 结果清单写到 `--report <file>`（默认 `<out>/report.json` + `.jsonl`）
 - stdout 逐项输出 JSONL（AI 可流式解析），stderr 打进度
 
