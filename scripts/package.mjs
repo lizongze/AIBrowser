@@ -333,11 +333,21 @@ async function writeCliShim(appDir, platform) {
     ]
     : [
       '#!/bin/sh',
-      '# AIBrowser 命令行入口（打包版）：用自带的 Electron 以 Node 模式执行 bin/pvs.js',
+      '# AIBrowser CLI shim (packaged): run bin/pvs.js with the bundled Electron in node mode',
       'HERE=$(cd "$(dirname "$0")" && pwd)',
-      'APP="$HERE/resources/app.asar"',
-      '[ -f "$HERE/resources/app.asar" ] || APP="$HERE/resources/app"',
-      'ELECTRON_RUN_AS_NODE=1 AIBROWSER_PACKAGED=1 "$HERE/AIBrowser" "$APP/bin/pvs.js" "$@"',
+      ...(platform === 'darwin'
+        ? [
+          // macOS 的可执行文件与资源都在 .app 里，和 linux 的平铺布局不同
+          'APP_BUNDLE="$HERE/AIBrowser.app/Contents"',
+          'APP="$APP_BUNDLE/Resources/app.asar"',
+          '[ -f "$APP" ] || APP="$APP_BUNDLE/Resources/app"',
+          'ELECTRON_RUN_AS_NODE=1 AIBROWSER_PACKAGED=1 "$APP_BUNDLE/MacOS/AIBrowser" "$APP/bin/pvs.js" "$@"',
+        ]
+        : [
+          'APP="$HERE/resources/app.asar"',
+          '[ -f "$APP" ] || APP="$HERE/resources/app"',
+          'ELECTRON_RUN_AS_NODE=1 AIBROWSER_PACKAGED=1 "$HERE/AIBrowser" "$APP/bin/pvs.js" "$@"',
+        ]),
       '',
     ];
   const target = path.join(appDir, shimName);
