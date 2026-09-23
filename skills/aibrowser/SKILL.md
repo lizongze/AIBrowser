@@ -41,6 +41,9 @@ bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh
 
 - 自带平台的判定：`uname -s`/`uname -m` → `linux-x64` / `darwin-arm64` / `win32-x64`…
   同一份 skill 里可以带多个平台，脚本会挑当前这个；也可以用 `AIBROWSER_BUNDLE=<目录>` 指定。
+- **Windows**：skill 的脚本是 bash，用 **Git Bash** 跑（`uname` 会报 MINGW64_NT → 自动选 `bundle/win32-x64`，
+  并调用里面的 `pvs.cmd`）；powershell / cmd 里也可以直接调
+  `bundle\win32-x64\pvs.cmd`（自带应用，同样不需要 node/npm）。
 - 详情见 skill 根目录的 `BUNDLE.md`（由 `npm run skill` 生成），各平台可执行文件与 sha256 在 `bundle/manifest.json`。
 - 没带 bundle 时，脚本按老顺序解析：`$PVS_HOME` → 安装记录 → 同仓库副本 → `PATH` 里的 `pvs`（开发用）。
 

@@ -297,10 +297,12 @@ async function writeCliShim(appDir, platform) {
   const shimName = platform === 'win32' ? 'pvs.cmd' : 'pvs';
   // 应用代码默认打进 resources/app.asar（asar 打包时），用 app.asar 路径；
   // 若将来改成 asar:false，这里也能用 app/ 找到（shim 里做了回退判断）。
+  // .cmd 必须是**纯 ASCII + CRLF**：cmd.exe 按控制台代码页（中文 Windows 是 GBK）解析批处理，
+  // 里面有 UTF-8 中文注释时会把注释行当成命令执行（踩过一次：双击一闪而逝 / 报「不是内部或外部命令」）。
   const lines = platform === 'win32'
     ? [
       '@echo off',
-      'REM AIBrowser 命令行入口（打包版）：用自带的 Electron 以 Node 模式执行 bin/pvs.js',
+      'REM AIBrowser CLI shim (packaged): run bin/pvs.js with the bundled Electron in node mode',
       'setlocal',
       'set "HERE=%~dp0"',
       'set "APP=%HERE%resources\\app.asar"',
@@ -321,7 +323,8 @@ async function writeCliShim(appDir, platform) {
       '',
     ];
   const target = path.join(appDir, shimName);
-  await fsp.writeFile(target, lines.join('\n'), 'utf8');
+  // Windows 用 CRLF + ASCII；POSIX 用 LF
+  await fsp.writeFile(target, lines.join(platform === 'win32' ? '\r\n' : '\n'), 'utf8');
   if (platform !== 'win32') await fsp.chmod(target, 0o755);
   return shimName;
 }

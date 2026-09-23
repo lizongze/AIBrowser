@@ -149,6 +149,7 @@ fc-cache -f ~/.fonts
 | 组装在哪 | 在系统临时目录（Linux 原生盘）里组装，最终只往 repo 放一个 tar.gz：repo 在 `/mnt/d`（drvfs）上，几千个小文件（含 15MB 的 app.asar）刚写出来就可能被 Windows 侧占用，覆盖/删除直接 EACCES |
 | 依赖裁剪 | `@codemirror/*`、`@lezer/*`、`codemirror` 已在构建时被 esbuild 打进 `dist/renderer.js`，运行时用不到 → 移到 devDependencies，asar 从 313MB 降到 **6MB**（应用包 118MB→111MB） |
 | 别把中间产物打进去 | 打包时若 `dist-skill/` 没被 ignore，会把整份自带应用塞进 asar（asar 直接翻倍）。`scripts/package.mjs` 的 IGNORE 已加 `dist-skill`、`skills/aibrowser/bundle`、`*.tar.gz` |
+| 包里 `pvs.cmd` 必须是纯 ASCII + CRLF | cmd.exe 按控制台代码页（中文 Windows 是 GBK）解析批处理，注释里有 UTF-8 中文会被当成命令执行，报「不是内部或外部命令」并多打一行乱码。实测踩到过，现在 shim 只用英文注释 + CRLF |
 | 打包版 CLI 的坑 | 自带应用里的 `pvs` 是 `ELECTRON_RUN_AS_NODE=1` 跑的；`pvs serve` 拉起子进程时必须**摘掉这个变量**，否则子进程也以 Node 模式启动 → 永远起不来（表现为「启动超时」） |
 | 清单位置 | skill 的清单在 `bundle/manifest.json`（**bundle 的上一层**，不在平台目录里）；`pvs packages` 会优先读它，列出「这份 skill 带了哪些平台」 |
 | install.sh | 检测到 `bundle/` 就默认**复制**安装（不建符号链接），也不写 `~/.aibrowser-skill.env`（自带应用不需要项目目录），并且只装用户级目录（下载目录的上级未必是项目） |
