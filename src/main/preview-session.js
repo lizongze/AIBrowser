@@ -49,8 +49,10 @@ const MAX_NETWORK_ENTRIES = 1000;
 function cleanUrl(value) {
   const text = String(value || '').trim().replace(/^["']|["']$/g, '');
   if (!text) return null;
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) || /^data:/.test(text) || /^about:/.test(text)) return text;
-  if (/^localhost(:\d+)?(\/|$)/i.test(text) || /^\d+\.\d+\.\d+\.\d+(:\d+)?(\/|$)/.test(text)) return `http://${text}`;
+  // 域名还原：外部传入的 someroute__safe__.cn 在实际加载时还原为 someroute.cn
+  const restored = text.replace(/__safe__\./g, '.');
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(restored) || /^data:/.test(restored) || /^about:/.test(restored)) return restored;
+  if (/^localhost(:\d+)?(\/|$)/i.test(restored) || /^\d+\.\d+\.\d+\.\d+(:\d+)?(\/|$)/.test(restored)) return `http://${restored}`;
   return null;
 }
 
