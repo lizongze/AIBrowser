@@ -17,9 +17,8 @@
 > ```
 
 
-**启动服务用 `--detach`**：`pvs serve --gui --detach --json` 拉起后立刻返回，再用 `pvs status --json`
-轮询到 `running:true`；阻塞式 `serve` 会在 agent 的 shell 包装器（无控制台 + 管道）里挂住。
-skill 的 `scripts/ensure-service.sh` 已经是这个流程。
+**起服务**：`pvs serve --gui --json` 默认**拉起即返回**（不等就绪），随后用 `pvs status --json` 确认
+`running:true`；想要「等就绪再返回」加 `--wait`。skill 的 `scripts/ensure-service.sh` 就是「拉起 + 轮询」。
 
 **先装好它**：本文件所在 skill 若是「自带应用」的包（目录里有 `bundle/<平台>-<架构>/`），
 解压后 `cp -r aibrowser ~/.agents/skills/` 就能用，不需要 node/npm；
@@ -70,7 +69,7 @@ $P stop                                                  # 收工
 | `pvs network [sessionId]` | 网络请求记录 | `--on` / `--off` / `--clear` |
 | `pvs reload [sessionId]` | 重新加载 | `--hard`（绕过缓存） |
 | `pvs close [sessionId]` | 关闭会话 | `--all` |
-| `pvs serve [--gui]` | 起常驻服务（`--gui` 开面板窗口，否则纯无头） | `--port n`、`--detach`（拉起即返回，配合 `status` 轮询；agent 包装器不会被挂住） |
+| `pvs serve [--gui]` | 起常驻服务（`--gui` 开面板窗口，否则纯无头）；**默认拉起即返回** | `--port n`、`--wait`（等就绪再返回） |
 | `pvs status` / `pvs stop` | 控制入口信息 / 关闭服务 | `--json`（`status` 里含当前浏览器身份 `identity`） |
 | `pvs tree [dir]` | 列出目录（文件树同一套忽略规则） | `--all` 连 `node_modules`/`.git` 一起列 |
 | `pvs debugWatch` | 热重载当前盯着哪些文件 | `--json` |
@@ -87,17 +86,15 @@ $P stop                                                  # 收工
 ### 3.0 起服务并确认就绪（所有配方的第一步）
 
 ```bash
-$P status --json                             # 已在跑（"running":true）就直接用
-$P serve --gui --detach --json               # 没跑就启动：立刻返回 {"ok":true,"spawning":true,...}
+bash <skill>/scripts/ensure-service.sh       # 一句搞定：拉起 + 确认就绪
+
+# 或者自己来（serve 拉起即返回，不会卡住调用方）
+$P serve --gui --json                        # 没跑就启动
 until $P status --json | grep -q '"running":true'; do sleep 0.5; done   # 轮询到就绪（通常 2-3s）
 ```
 
-- **一定带 `--detach`**：不带它会等服务就绪才返回；agent 的 shell 包装器（无控制台 + 管道的
-  PowerShell）在等待期间会把整条命令挂住，最后超时被 kill，看起来像启动失败（其实服务已起来）。
-- `ensure-service.sh` 内部就是这个流程（还会按需从无头切成面板、检测仓库代码是否比服务新），
-  agent 直接调它最省事：`bash <skill>/scripts/ensure-service.sh`。
-- Windows 上 cmd / PowerShell 用 `bundle\win32-x64\pvs.cmd`，写法见 `skills/aibrowser/SKILL.md` 第 0 节
-  「第 4 步」。
+- 已经在跑（`status` 里 `"running":true`）就不用重复启动。
+- Windows 上 cmd / PowerShell 用 `bundle\win32-x64\pvs.cmd`，写法见 `skills/aibrowser/SKILL.md` 第 0 节「第 4 步」。
 
 ### 3.1 改完前端代码自检
 
@@ -176,16 +173,12 @@ $P code ./src/app.ts --line 42 --json
 向用户确认截图输出目录（如用户消息里已指明则直接用）。可在目录下加时间戳子目录，
 也可直接用用户给的路径。**不要写死 `gen/<时间戳>/`**。
 
-**Step 1 — 确保面板服务运行（GUI 模式，用 `--detach`）**
+**Step 1 — 确保面板服务运行（GUI 模式）**
 
 ```bash
-$P status --json                 # 已运行且 "mode":"gui" 就跳过
-$P serve --gui --detach --json   # 启动：立刻返回，不阻塞调用方
-until $P status --json | grep -q '"running":true'; do sleep 0.5; done   # 轮询就绪
+bash <skill>/scripts/ensure-service.sh          # 一句搞定（拉起 + 轮询就绪）
+# 或：$P serve --gui --json 然后轮询 $P status --json 到 "running":true
 ```
-
-> 必须带 `--detach`：阻塞式 `serve` 要等服务就绪才返回，agent 的 shell 包装器（无控制台 + 管道的
-> PowerShell）在等待期间会把命令挂住、最后被超时 kill —— 看起来像没启动成功，其实服务已经起来了。
 
 代码文件只有 GUI 面板服务才能截到「整块面板」（标签条 + 行号栏），无头服务只能截到纯代码页。
 

@@ -454,12 +454,10 @@ async function commandServe(_args, flags) {
   // 否则长活的 GUI 子进程会继承调用方（agent 的 shell）的 stdout/stderr 管道并一直握着，
   // 调用方永远等不到 EOF → 表现就是「命令一直 pending、拿不到回传」。日志改由应用自己写文件。
   const childArgs = [...appArg, ...(wantGui ? [] : ['--headless']), ...guiFlags, ...(flags.port ? [`--port=${flags.port}`] : [])];
-  // 直接 spawn + detached + stdio:'ignore'：子进程拿 NUL 作为标准流，不再继承调用方的管道。
-  // （试过 `cmd /c start`，反而让 start 静默失败、服务起不来；日志靠 AIBROWSER_LOG_FILE 写文件。）
-  // Windows：用 PowerShell 的 Start-Process 拉起（ShellExecuteEx 路径，不会继承本进程的句柄）。
-  // 直接 spawn 时 libuv 会带上句柄继承，长活的 GUI 进程于是握着调用方（agent 的 shell）的 stdout 管道，
-  // 调用方永远读不到 EOF —— 表现就是「命令一直 pending」。Git Bash / cmd 链路不受影响，只有
-  // 「无控制台的 PowerShell + 管道」这种 harness 链路会中招，所以在这里显式绕开。
+  // 拉起方式：Windows 用 PowerShell 的 Start-Process（ShellExecuteEx 路径），其他平台直接 spawn。
+  // 两者都 detached + stdio:'ignore'：子进程拿 NUL 作标准流、不继承调用方的 stdout/stderr 管道
+  // （继承的话长活的 GUI 进程会一直握着管道，调用方读不到 EOF —— 表现就是命令 pending）。
+  // 日志由应用自己写 AIBROWSER_LOG_FILE。
   const child = (process.platform === 'win32'
     ? spawn('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
@@ -478,18 +476,30 @@ async function commandServe(_args, flags) {
       },
     }));
   child.unref();
-  // --detach：不等就绪，立刻返回（调用方自己去轮询 status）。
-  // 用途：agent 的 shell 包装器（尤其是无控制台 + 管道的 PowerShell）会在我们等待期间
-  // 一直挂着，表现就是「命令 pending」。给它一个立刻返回的选项最省事。
-  if (flags.detach || flags.background) {
-    const info = { ok: true, spawning: true, pid: child.pid || null, mode: wantGui ? 'gui' : 'daemon',
-      note: '服务在后台启动中；用 pvs status 确认（pvs status --json 会返回 running/port/socket/token）' };
+  // 等待策略：**默认拉起即返回**（不等就绪）。
+  // 为什么默认不等：拉起服务的调用方常常是 agent 的 shell 包装器（无控制台 + 管道的 PowerShell），
+  // 它们会在我们等待期间把整条命令挂住、最后超时 kill —— 看起来像启动失败，其实服务已经起来了。
+  // 需要「就绪后再继续」的脚本自己加 --wait（旧行为，上限 30s）或 --wait-ms <毫秒>。
+  const quickWaitMs = flags.wait || flags.block
+    ? (wantGui ? 30000 : 25000)
+    : (flags['wait-ms'] !== undefined ? Math.max(0, Number(flags['wait-ms']) || 0) : 0);
+  const ready = quickWaitMs > 0
+    ? await waitForReady({ timeoutMs: quickWaitMs, startedAt })
+    : { ok: false };
+  if (!ready.ok) {
+    const info = {
+      ok: true,
+      spawning: true,
+      ready: false,
+      pid: child.pid || null,
+      mode: wantGui ? 'gui' : 'daemon',
+      note: '服务已在后台启动；用 pvs status --json 看 "running":true',
+    };
     if (flags.json) jsonOut(info);
     else out(`已在后台启动${wantGui ? '预览面板' : '无头预览服务'} · pid ${info.pid || '?'}（用 pvs status 确认就绪）`);
     child.unref();
     process.exit(EXIT_OK);
   }
-  const ready = await waitForReady({ timeoutMs: wantGui ? 30000 : 25000, startedAt });
   if (!ready.ok) {
     errOut('启动超时');
     return EXIT_FAIL;

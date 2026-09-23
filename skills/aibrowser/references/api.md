@@ -41,6 +41,7 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 | --- | --- | --- |
 | `ping` | — | `{pong,pid,mode,version,chrome,identity}`；`identity` = 对外自报的浏览器身份（默认同版本 Windows Chrome） |
 | `open` | `file` 或 `url`、`root`、`focus`、`fresh`（先关掉所有已有面板） | `{sessionId,url,title,kind}` |
+| （CLI）`serve` | `--gui`、`--wait`（等就绪再返回；默认不等） | 默认 `{ok:true,spawning:true,pid,mode}`；`--wait` 时给 `{pid,port,socket,token}` |
 | `openCode` | `file`、`line`、`column` | `{sessionId,kind:'code',language}` |
 | `openPath` | `path`（目录自动找 index.html，按类型选网页/代码） | 同上 |
 | `list` | — | `{sessions:[…],roots:[…]}` |
