@@ -23,7 +23,7 @@ const BOOLEAN_FLAGS = new Set([
 const VALUE_FLAGS = new Set([
   'from', 'dir', 'ext',
   'scale-factor',
-  'out', 'format', 'quality', 'selector', 'session', 'root', 'port', 'line', 'column', 'timeout', 'mode', 'file', 'url', 'base64', 'input', 'identity',
+  'out', 'format', 'quality', 'selector', 'session', 'root', 'port', 'line', 'column', 'timeout', 'mode', 'file', 'url', 'base64', 'input', 'identity', 'target', 'platform', 'arch',
 ]);
 
 function parseArgs(argv) {
@@ -89,6 +89,7 @@ const HELP = `AIBrowser (pvs) — Chromium 网页预览 + 代码高亮预览，A
   pvs content [sessionId] [--selector css] [--html] [--json]   取渲染后的文本 / HTML
   pvs eval "<js>" [--session id] [--json]                 在页面里执行 JS
   pvs console [sessionId] [--clear] [--json]              读取控制台日志
+  pvs packages [--target win32|linux|darwin] [--arch x64]  列出打包产物（AI 按平台挑应用文件）
   pvs tree [dir] [--all] [--json]                         列出目录（默认忽略 node_modules/.git 等）
   pvs debugWatch [--json]                                 热重载当前关注哪些文件（tab 文件 + 页面引用的资源）
   pvs network [sessionId] [--on|--off] [--clear] [--json] 网络请求记录

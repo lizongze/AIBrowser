@@ -46,6 +46,42 @@ Windows 原生运行下的界面（全屏模式：只留标签条，标题栏与
 > 代码区使用 Cascadia Code（含编程连字）；界面中文字体优先微软雅黑/苹方/思源黑体。
 > 想在 WSL 里获得同样的画质，见 [`docs/NOTES.md`](docs/NOTES.md) 的「在 Windows 原生运行」。
 
+## 打包成各平台应用（给 AI 直接用）
+
+```bash
+npm run package                          # 当前平台
+npm run package -- --targets all         # linux + win32 + darwin（能下到 Electron 就行）
+npm run package -- --targets win32       # 交叉打 Windows 包（复用 node_modules.win* 里的现成 dist，离线可用）
+pvs packages --json                      # 列出产物（AI 按平台挑文件）
+pvs packages --target win32 --json       # 只挑 Windows 的
+```
+
+产物落在 `release/`（已 gitignore）：
+
+```
+release/AIBrowser-0.1.0-linux-x64.zip     # 113MB：Electron 运行时 + 应用，解压即用
+release/AIBrowser-0.1.0-win32-x64.zip
+release/AIBrowser-0.1.0-darwin-arm64.zip
+release/manifest.json                     # 每个产物的平台/架构/可执行文件/sha256/说明
+```
+
+解压后：`AIBrowser`（GUI 或 `--headless` 服务），另有 `pvs` / `pvs.cmd` 命令行入口 ——
+**用同一份应用以 Node 模式执行，不需要目标机器装 node / npm / 依赖**：
+
+```bash
+unzip AIBrowser-0.1.0-linux-x64.zip && cd AIBrowser-linux-x64
+./AIBrowser                      # 面板窗口
+./AIBrowser --headless           # 无头服务
+./pvs open ./index.html --root . # 命令行（等价于开发时的 pvs）
+./pvs shot --out page.png --json
+```
+
+`manifest.json` 就是给 AI/脚本看的清单：`pick["win32-x64"].archive` 直接给出该平台该下哪个包。
+MCP 里对应 `browser_packages` 工具，CLI 里对应 `pvs packages`。
+
+> macOS 产物未签名：首次打开需右键「打开」或 `xattr -dr com.apple.quarantine`；要分发给别人请自行签名/公证。
+> 交叉打包出来的包请务必在目标平台跑一次自检：`AIBrowser --smoke-test --headless`（应输出 18/18）。
+
 ## 快速开始
 
 ```bash
@@ -152,6 +188,7 @@ npm link && pvs <命令>           # 或者安装到 PATH，之后可以直接 p
 | `pvs network [id] [--on\|--off] [--clear]` | 网络请求记录 |
 | `pvs reload [id] [--hard]` / `pvs close [id\|--all]` | 刷新 / 关闭会话 |
 | `pvs serve [--gui]` / `pvs stop` / `pvs status` | 常驻服务（`--gui` 开面板窗口，否则纯无头）；`--native-ua` 保留 Electron 原始 UA |
+| `pvs packages [--target win32\|linux\|darwin] [--json]` | 列出已打包的各平台应用（按平台挑 zip / 可执行文件 / sha256） |
 
 通用参数：`--json`（单行 JSON 输出，便于脚本与 AI 解析）、`--root <dir>`、`--daemon`、`--gui`、`--no-spawn`、`--quiet`。
 

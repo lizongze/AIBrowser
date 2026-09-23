@@ -136,6 +136,24 @@ fc-cache -f ~/.fonts
 
 全屏模式下按 `Esc` 或 `Ctrl+Shift+M` 可临时退出查看完整界面（退出状态会持久化）。
 
+## 跨平台打包（release/ 与 manifest.json）
+
+`npm run package -- --targets linux,win32,darwin` 会为每个平台产出一个「拿起来就能跑」的应用：
+Electron 运行时 + 应用代码（asar）打成一个 zip，并写 `release/manifest.json` 给 AI/脚本按平台挑。
+
+几个实现上的要点（都踩过）：
+
+| 事项 | 做法 / 原因 |
+| --- | --- |
+| Electron 预编译包从哪来 | 1) `~/.cache/aibrowser-electron`（本脚本下的）→ 2) `~/.cache/electron`（electron 安装器的）→ 3) 已安装且**平台匹配**的 `node_modules[.win*]/electron/dist` → 4) 镜像 / GitHub 下载 |
+| 交叉打 Windows 包 | 直接复用 `node_modules.win*` 里的现成 dist（离线也能打）；darwin 一律下载（拿 Linux 文件拼 .app 会失败在 `Contents/Info.plist`） |
+| 组装目录 | 放在系统临时目录（Linux 原生盘）而不是 repo 里：repo 在 `/mnt/d`（drvfs），刚生成的 `app.asar` 会被 Windows 侧短暂占用，删除直接 EACCES（连 PowerShell 都删不掉） |
+| 打包器要求 package.json 有 `author` | 否则 Windows 目标直接报错；顺手补了 `win32metadata`（exe 属性页的公司/产品名） |
+| 命令行入口 | 包里放 `pvs` / `pvs.cmd`：用**同一份应用**以 `ELECTRON_RUN_AS_NODE=1` 跑 `resources/app.asar/bin/pvs.js`，目标机器不需要 node/npm；CLI 里靠 `AIBROWSER_PACKAGED=1` 把「子进程该起哪个可执行文件」指向自己 |
+| asar 与 shim | `resources/app.asar` 是文件不是目录，shim 里判断存在性要看 `app.asar` 本身（`-f $APP/bin/pvs.js` 永远为假） |
+| macOS | 未签名：首次打开右键「打开」或 `xattr -dr com.apple.quarantine`；本机（Linux）无法验证运行，只能产出文件 |
+| 校验 | 交叉产物务必在目标平台跑 `AIBrowser --smoke-test --headless`（应为 18/18）；Windows 产物本次实测就是这个结果 |
+
 ## 共享的 node_modules 被另一平台覆盖（WSL ↔ Windows）
 
 一个 checkout 两边用（`/mnt/d` ↔ `D:`），只要在**一侧**执行 `npm install`，就会把**另一侧**的原生二进制换掉：

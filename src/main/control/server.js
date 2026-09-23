@@ -602,6 +602,31 @@ class ControlServer {
       case 'logs':
         return { mode: this.mode, pid: process.pid, port: this.port, socket: socketPath(), token: this.token, runtimeDir: runtimeDir() };
 
+      // 打包产物清单：按平台挑「该用哪个应用文件」（AI 通过 HTTP/socket 也能问）
+      case 'packages': {
+        const { readManifest, pickArtifacts, summarize } = require('../release-manifest');
+        const { file, manifest } = readManifest(path.resolve(__dirname, '..', '..', '..'));
+        if (!manifest) {
+          return { ok: false, manifest: file, artifacts: [], error: '还没有打包产物，先运行：npm run package -- --targets all' };
+        }
+        const wanted = pickArtifacts(manifest, { platform: params.target || params.platform, arch: params.arch });
+        const available = (manifest.artifacts || []).map((a) => `${a.platform}-${a.arch}${a.ok ? '' : '(失败)'}`).join(', ') || '（无）';
+        const wantedLabel = [params.target || params.platform, params.arch].filter(Boolean).join('-') || '任意平台';
+        return {
+          ok: wanted.length > 0,
+          ...(wanted.length ? {} : {
+            error: `清单里没有匹配的产物（${wantedLabel}）；已有：${available}。`
+              + `重新打包：npm run package -- --targets ${params.target || params.platform || 'all'}`,
+          }),
+          manifest: file,
+          version: manifest.version,
+          electron: manifest.electron,
+          generatedAt: manifest.generatedAt,
+          artifacts: wanted.map(summarize),
+          picked: summarize(wanted[0]) || null,
+        };
+      }
+
       // 热重载覆盖情况：面板里当前盯着哪些文件、类型覆盖多少（验收与自查用）
       case 'debugWatch': {
         const session = manager.resolve(params.sessionId);

@@ -3,7 +3,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { parseArgs, HELP } = require('./args');
-const { send, ensureTarget, resolveTarget, stopTarget } = require('./client');
+const { send, ensureTarget, resolveTarget, stopTarget, electronBinary } = require('./client');
 const { readState, pidAlive, socketPath, runtimeDir } = require('../control/state');
 const { normalizePath } = require('../file-service');
 const { writeStdout, writeStderr } = require('../safe-io');
@@ -204,6 +204,49 @@ async function commandTree(args, flags) {
   return EXIT_OK;
 }
 
+async function commandPackages(_args, flags) {
+  const { projectRoot } = require('./client');
+  const { readManifest, pickArtifacts, summarize } = require('../release-manifest');
+  const { file, manifest } = readManifest(projectRoot());
+  if (!manifest) {
+    if (flags.json) jsonOut({ ok: false, error: `还没有打包产物（缺 ${file}）。先运行：npm run package -- --targets all` });
+    else errOut(`还没有打包产物（缺 ${file}）。\n先运行：npm run package -- --targets all`);
+    return EXIT_FAIL;
+  }
+  const target = flags.target || flags.platform || null;
+  const arch = flags.arch || null;
+  const wanted = pickArtifacts(manifest, { platform: target, arch });
+  if (flags.json) {
+    jsonOut({
+      ok: wanted.length > 0,
+      version: manifest.version,
+      electron: manifest.electron,
+      generatedAt: manifest.generatedAt,
+      manifest: file,
+      artifacts: wanted.map(summarize),
+      picked: summarize(wanted[0]) || null,
+    });
+    return wanted.length ? EXIT_OK : EXIT_FAIL;
+  }
+  out(`AIBrowser ${manifest.version} · Electron ${manifest.electron} · 清单生成于 ${manifest.generatedAt}`);
+  if (!wanted.length) {
+    const available = (manifest.artifacts || []).map((a) => `${a.platform}-${a.arch}${a.ok ? '' : '(失败)'}`).join(', ') || '（无）';
+    errOut(`清单里没有匹配的产物（${[target, arch].filter(Boolean).join('-') || '任意平台'}）；已有：${available}`);
+    errOut(`重新打包：npm run package -- --targets ${target || 'all'}`);
+    return EXIT_FAIL;
+  }
+  out('');
+  for (const a of wanted) {
+    out(`${a.platform}-${a.arch}  ${Math.round(a.archiveBytes / 1024 / 1024)}MB  ${a.archive}`);
+    out(`  可执行文件（解压后）：${a.executableRel}`);
+    out(`  命令行入口：${path.basename(a.cli || '')}（用同一份应用，无需 node/npm）`);
+    out(`  sha256：${String(a.sha256).slice(0, 16)}…   ${a.note || ''}`);
+  }
+  out('');
+  out('解压后直接跑：AIBrowser（GUI）或 ./pvs serve（无头服务）。');
+  return EXIT_OK;
+}
+
 async function commandDebugWatch(_args, flags) {
   const { state } = await ensureTarget(targetOptions(flags));
   const result = await send('debugWatch', { sessionId: flags.session }, { state });
@@ -373,19 +416,9 @@ async function commandServe(_args, flags) {
   }
   const { spawn } = require('node:child_process');
   const { projectRoot, waitForReady } = require('./client');
-  const fs = require('node:fs');
-  const path = require('node:path');
-  // electron 二进制可能因平台不匹配而缺失（如 Linux 版 dist 落在 Windows 上）。
-  // 此时尝试用 ELECTRON_OVERRIDE_DIST_PATH 指向同仓库内的备用 dist（node_modules.win2）。
-  let ELECTRON_BIN = require('electron');
-  if (!fs.existsSync(ELECTRON_BIN)) {
-    const fallback = path.resolve(projectRoot(), 'node_modules.win2', 'node_modules', 'electron', 'dist');
-    if (fs.existsSync(path.join(fallback, 'electron.exe'))) {
-      process.env.ELECTRON_OVERRIDE_DIST_PATH = fallback;
-      delete require.cache[require.resolve('electron')];
-      ELECTRON_BIN = require('electron');
-    }
-  }
+  // 可执行文件按平台挑（共享 node_modules 里可能装的是另一平台的 Electron）；
+  // 打包版则用应用自己的可执行文件。详见 client.electronBinary()。
+  const ELECTRON_BIN = electronBinary();
   const startedAt = Date.now();
   // 子进程的 stdout/stderr 落盘到 <runtimeDir>/<mode>.log，而不是继承父进程的管道：
   // 拉起面板的 agent shell / cmd 随时会退出，继承的管道一断，子进程每次写日志都会拿到
@@ -396,7 +429,9 @@ async function commandServe(_args, flags) {
   if (flags.fullscreen) guiFlags.push('--fullscreen');
   if (flags['no-fullscreen']) guiFlags.push('--no-fullscreen');
   if (flags['show-sidebar']) guiFlags.push('--show-sidebar');
-  const child = spawn(ELECTRON_BIN, [projectRoot(), ...(wantGui ? [] : ['--headless']), ...guiFlags, ...(flags.port ? ['--port', String(flags.port)] : [])], {
+  // 打包版：可执行文件自带应用，不需要再传应用目录
+  const appArg = process.env.AIBROWSER_PACKAGED === '1' ? [] : [projectRoot()];
+  const child = spawn(ELECTRON_BIN, [...appArg, ...(wantGui ? [] : ['--headless']), ...guiFlags, ...(flags.port ? ['--port', String(flags.port)] : [])], {
     detached: true,
     stdio: ['ignore', logFile.fd, logFile.fd],
     env: {
@@ -493,6 +528,8 @@ const COMMANDS = {
   eval: commandEval,
   console: commandConsole,
   tree: commandTree,
+  packages: commandPackages,
+  release: commandPackages,
   debugWatch: commandDebugWatch,
   watch: commandDebugWatch,
   logs: commandConsole,

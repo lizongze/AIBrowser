@@ -7,11 +7,54 @@ const path = require('node:path');
 const { readState, probe, pidAlive, runtimeDir, env } = require('../control/state');
 const { writeStderr } = require('../safe-io');
 
-const ELECTRON_BIN = require('electron');
-
 function projectRoot() {
   return path.resolve(__dirname, '..', '..', '..');
 }
+
+/**
+ * 找「本平台能用的 Electron 可执行文件」。三种场景：
+ *   1) 打包后的应用里：直接用应用自己的可执行文件（bin/pvs 的 shim 会设 AIBROWSER_PACKAGED=1）；
+ *   2) Windows 原生 + 共享 node_modules：devDependency 里装的可能是 Linux 版，
+ *      所以优先看 node_modules.win*（run-native.cmd 用的就是它们）；
+ *   3) 普通 WSL / Linux：node_modules/electron/dist/electron。
+ * 注意：require('electron') 返回的路径在跨平台共享 node_modules 时经常是「另一平台」的，
+ * 所以这里要按文件是否存在来挑，而不是无条件相信它。
+ */
+function electronBinary() {
+  if (process.env.AIBROWSER_PACKAGED === '1') return process.execPath;
+  const root = projectRoot();
+  const candidates = [];
+  if (process.platform === 'win32') {
+    for (const dir of ['node_modules.win2', 'node_modules.win3', 'node_modules.win', 'node_modules']) {
+      candidates.push(path.join(root, dir, 'node_modules', 'electron', 'dist', 'electron.exe'));
+    }
+  } else {
+    try {
+      const fromPackage = require('electron');
+      if (typeof fromPackage === 'string') candidates.push(fromPackage);
+    } catch {
+      /* 打包版或依赖缺失 */
+    }
+    candidates.push(path.join(root, 'node_modules', 'electron', 'dist', 'electron'));
+  }
+  const found = candidates.find((file) => {
+    try {
+      return fs.existsSync(file);
+    } catch {
+      return false;
+    }
+  });
+  if (found) return found;
+  try {
+    const fromPackage = require('electron');
+    if (typeof fromPackage === 'string') return fromPackage;
+  } catch {
+    /* 忽略 */
+  }
+  return process.execPath; // 最后兜底：跑自己（打包版行为）
+}
+
+const ELECTRON_BIN = electronBinary();
 
 function requestOverSocket(socketPath, action, params, { timeoutMs = 15000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -136,11 +179,20 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   }
 
   const headless = mode !== 'gui';
-  const args = [projectRoot(), '--headless', ...(port ? ['--port', String(port)] : [])];
+  // 打包版：可执行文件自带应用，不需要再传应用目录
+  const appArg = process.env.AIBROWSER_PACKAGED === '1' ? [] : [projectRoot()];
+  const args = [...appArg, '--headless', ...(port ? ['--port', String(port)] : [])];
   const child = spawn(ELECTRON_BIN, args, {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, AIBROWSER_HEADLESS: '1', ...(identity ? { AIBROWSER_IDENTITY: identity } : {}) },
+    env: {
+      ...process.env,
+      AIBROWSER_HEADLESS: '1',
+      ...(identity ? { AIBROWSER_IDENTITY: identity } : {}),
+      // 打包版 CLI 自己是以「Node 模式」跑的，子进程要当真正的应用启动
+      ELECTRON_RUN_AS_NODE: undefined,
+      AIBROWSER_PACKAGED: process.env.AIBROWSER_PACKAGED || undefined,
+    },
   });
   child.unref();
   if (!quiet) writeStderr(`[pvs] 启动${headless ? '无头预览服务' : '预览面板'}（pid ${child.pid}）…`);
@@ -176,6 +228,7 @@ async function stopTarget() {
 }
 
 module.exports = {
+  electronBinary,
   send,
   ensureTarget,
   resolveTarget,

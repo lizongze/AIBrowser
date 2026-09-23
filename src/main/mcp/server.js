@@ -80,6 +80,17 @@ const TOOLS = [
     },
   },
   {
+    name: 'browser_packages',
+    description: '列出已经打好的各平台应用产物（zip + 解压后的可执行文件 + sha256），用于「让 AI 直接选对应平台的应用」：给 target 就只返回该平台的；没有产物时返回如何生成（npm run package -- --targets all）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', enum: ['linux', 'win32', 'darwin'], description: '按平台筛选（可选）' },
+        arch: { type: 'string', description: '按架构筛选，如 x64 / arm64（可选）' },
+      },
+    },
+  },
+  {
     name: 'browser_batch',
     description: '批量：给一份 URL/文件清单，串行逐个打开并截图，返回结果清单（每项含截图路径、尺寸与可选文本）。默认每项只出一张整页图；只有用户明确要求多尺寸时才在项里加 viewports。适合「一次处理很多页面」而非逐个调用。',
     inputSchema: {
@@ -223,6 +234,28 @@ async function handleTool(name, args) {
         fresh: args.fresh !== false,
       });
       return textResult(result);
+    }
+    case 'browser_packages': {
+      const manifestPath = path.resolve(__dirname, '..', '..', '..', 'release', 'manifest.json');
+      let manifest = null;
+      try {
+        manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      } catch {
+        return textResult({ ok: false, error: `还没有打包产物（${manifestPath} 不存在）。运行：npm run package -- --targets all` });
+      }
+      const wanted = (manifest.artifacts || []).filter((a) => a.ok
+        && (!args.target || a.platform === args.target)
+        && (!args.arch || a.arch === args.arch));
+      return textResult({
+        ok: wanted.length > 0,
+        version: manifest.version,
+        electron: manifest.electron,
+        generatedAt: manifest.generatedAt,
+        artifacts: wanted.map((a) => ({
+          platform: a.platform, arch: a.arch, archive: a.archive,
+          executable: a.executableRel, cli: a.cli, sha256: a.sha256, bytes: a.archiveBytes, note: a.note,
+        })),
+      });
     }
     case 'browser_batch': {
       const items = Array.isArray(args.items) ? args.items : [];

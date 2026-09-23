@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "基于 Chromium 内核的网页预览 + 代码高亮预览工具（AI 可调用）",
+  "author": "zongze.li",
   "main": "src/main/main.js",
   "bin": {
     "pvs": "bin/pvs.js",
@@ -19,11 +20,14 @@
     "verify": "npm run build && node scripts/verify.mjs",
     "panel:check": "electron scripts/panel-check.cjs",
     "mcp": "node bin/aibrowser-mcp.js",
-    "postinstall": "node scripts/install-skill.mjs"
+    "postinstall": "node scripts/install-skill.mjs",
+    "package": "node scripts/package.mjs",
+    "package:all": "node scripts/package.mjs --targets all"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "concurrently": "^9.1.2",
-    "electron": "^38.0.0",
+    "electron": "^38.8.6",
     "esbuild": "^0.25.0"
   },
   "dependencies": {

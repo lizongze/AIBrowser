@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 
 // ESM 里没有 require：判断「真实 electron 二进制」路径时要用它（.bin/electron 是 node shim）
 const require = createRequire(import.meta.url);
@@ -553,6 +554,24 @@ async function main() {
   // 批量自己开的标签要在下一项开始前关掉，只留最后一项；别的会话（验收前面的步骤开的）不归它管
   check(openAfterBatch.sessions.length <= sessionsBeforeBatch + 1, '批量结束后面板不堆标签',
     `会话 ${sessionsBeforeBatch} → ${openAfterBatch.sessions.length}`);
+
+  // 打包产物清单：AI 按平台挑「该用哪个应用文件」——挑出来的文件必须真实存在，sha256 要对得上
+  const packages = await api('packages', { target: process.platform === 'win32' ? 'win32' : process.platform });
+  if (packages.ok) {
+    const picked = packages.picked;
+    const digest = createHash('sha256').update(fs.readFileSync(picked.archive)).digest('hex');
+    check(
+      fs.existsSync(picked.archive) && digest === picked.sha256 && Boolean(picked.executable),
+      '打包清单能按平台挑出产物（文件与 sha256 都对得上）',
+      `${path.basename(picked.archive)} · ${Math.round(picked.bytes / 1024 / 1024)}MB`,
+    );
+  } else {
+    check(
+      String(packages.error || '').includes('npm run package'),
+      '没有（或没有匹配的）打包产物时给出生成命令',
+      String(packages.error || ''),
+    );
+  }
 
   // 空标签：可以连续新建多个，并且排在所有会话标签之后
   await api('panelAction', { action: 'new-tab' });
