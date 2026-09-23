@@ -26,9 +26,13 @@ npm link                            # 可选：把 pvs 装到 PATH，之后可�
 bash scripts/ensure-service.sh      # 确保后台服务已就绪（幂等，见下）
 ```
 
-**如何找到 AIBrowser 项目**：本 skill 目录下的 `scripts/pvs.sh` 会自动解析，顺序为
+**如何找到 AIBrowser**：本 skill 目录下的 `scripts/pvs.sh` 会自动解析，顺序为
 `$PVS_HOME` → `$AIBROWSER_HOME` → 同仓库内的副本 → `PATH` 里的 `pvs`。
 若都找不到，向用户询问项目路径并设置 `export PVS_HOME=/path/to/aibrowser`。
+
+**只有打包版（没装 node/npm）时**：解压 `release/AIBrowser-<版本>-<平台>-<架构>.zip`，
+把目录加进 `PATH`（里面有 `pvs` / `pvs.cmd`），本 skill 会自动走 `PATH` 那一档 —— 后续所有命令
+（`open` / `shot` / `batch` / `packages` …）都用这份应用，不需要项目目录。
 
 **一条命令 = 一个面板（重要）**：本 skill 的 `scripts/pvs.sh` 会给 `open` / `code` 自动加 `--fresh` ——
 打开新文件前先关掉之前所有面板，避免 AI 连开几个文件后堆出一排标签（热重载也只盯当前这个文件）。
@@ -70,7 +74,13 @@ $P shot --selector ".card" --out /tmp/card.png --json
 $P tree ./src --json
 $P tree . --all --json
 
+# 打包产物：别的机器/平台该用哪个应用文件（AI 直接按平台挑）
+$P packages --json                       # 全部产物（平台 / zip / 解压后的可执行文件 / sha256）
+$P packages --target win32 --json        # 只挑 Windows 的
+$P packages --target darwin --arch arm64 --json
+
 # 排错
+$P status --json                 # 服务状态 + 当前对外自报的浏览器身份（identity 字段）
 $P debugWatch --json             # 热重载当前盯着哪些文件（tab 里的文件 + 页面引用的资源）
 $P console --json
 $P network --on && $P reload && $P network --json
@@ -198,9 +208,38 @@ node bin/pvs.js close --all --json
 } } }
 ```
 
-工具：`browser_open`、**`browser_batch`（items 列表参数）**、`browser_content`、`browser_eval`、
-`browser_screenshot`、`browser_console`、`browser_network`、`browser_read_file`、`browser_write_file`、
-`browser_sessions`、`browser_health`。
+工具：`browser_open`、**`browser_batch`（items 列表参数）**、**`browser_packages`（按平台挑打包产物）**、
+`browser_content`、`browser_eval`、`browser_screenshot`、`browser_console`、`browser_network`、
+`browser_read_file`、`browser_write_file`、`browser_sessions`、`browser_health`。
+
+## 在别的平台/机器上跑（打包产物）
+
+项目可以一次打出各平台的应用（`npm run package -- --targets all`），产物在 **`<项目目录>/release/`**：
+每个平台一个 zip（自带 Electron 运行时 + 应用），解压即用，**目标机器不需要 node / npm / 依赖**。
+
+```bash
+$P packages --target win32 --json      # 让 AI 直接拿到该平台的 zip 路径
+# 解压后：
+#   AIBrowser（GUI） / AIBrowser --headless（无头服务） / ./pvs（命令行，等价于开发时的 pvs）
+```
+
+清单 `release/manifest.json` 里每个产物都有 `platform` / `arch` / `archive` / `executableRel` / `sha256` /
+`note`，`pick["<平台>-<架构>"]` 就是「该下哪个、解压后跑哪个」。MCP 里对应 `browser_packages`。
+
+- 没有产物时（清单不存在或没有该平台）：命令会告诉你生成命令，**不要**自己猜路径。
+- 交叉打包出来的包（例如在 Linux 上打 Windows 包）请先在目标平台跑一次
+  `AIBrowser --smoke-test --headless`（应输出 18/18）再用。
+- macOS 产物未签名：首次打开需右键「打开」，或 `xattr -dr com.apple.quarantine`。
+
+## 页面看到的浏览器身份
+
+预览默认对外自报**同版本 Windows Chrome**（UA / Client Hints / `navigator.platform` / `Accept-Language`
+四处一致，不含 `Electron/…`、`AIBrowser/…`）—— 避免站点看到 Electron 就禁用能力或拒绝服务，
+让截图结果和真实浏览器一致。
+
+- 想确认当前身份：`$P status --json` 看 `identity`（`mode` / `userAgent` / `summary`）。
+- 排查「页面是否真的按 UA 走分支」时，可以用 `--native-ua`（或 `AIBROWSER_IDENTITY=native`）启动服务，
+  恢复 Electron 原始身份；**不要**为了绕检测去改页面里的 `navigator`（这层刻意没做）。
 
 ## 必须遵守的三条
 
@@ -233,6 +272,8 @@ node bin/pvs.js close --all --json
 - **用完可停**：`$P stop`（下次调用会自动重启）。
 - 截图是**物理像素**，尺寸 = 逻辑尺寸 × 渲染缩放，别把它当 CSS 像素用。
 - 控制信息在 `${XDG_RUNTIME_DIR:-$HOME}/.aibrowser/state.json`（`port` / `socket` / `token`）。
+- **热重载**只盯「面板里打开的文件 + 该页面实际引用的本地资源」（`$P debugWatch --json` 可查），
+  没打开也没被引用的文件改了不会刷新；资源类型覆盖前端/后端/测试等 9 类 160 种后缀。
 
 ## 更多
 

@@ -38,7 +38,7 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 
 | action | 参数 | 返回 |
 | --- | --- | --- |
-| `ping` | — | `{pong,pid,mode,version}` |
+| `ping` | — | `{pong,pid,mode,version,chrome,identity}`；`identity` = 对外自报的浏览器身份（默认同版本 Windows Chrome） |
 | `open` | `file` 或 `url`、`root`、`focus`、`fresh`（先关掉所有已有面板） | `{sessionId,url,title,kind}` |
 | `openCode` | `file`、`line`、`column` | `{sessionId,kind:'code',language}` |
 | `openPath` | `path`（目录自动找 index.html，按类型选网页/代码） | 同上 |
@@ -58,9 +58,35 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 | `ui` | `view:'code'\|'web'\|'console'` | `{view}`（有面板时切视图） |
 | `batch` | `items`、`outDir`、`fullPage`、`timeout`、`format` | `{total,succeeded,failed,items:[{index,target,name,ok,image,images,width,height,bytes,source,sessionId}]}`；串行逐项切成活动标签，`source=panel` 表示该项截的是整块面板 |
 | `debugWatch` | `sessionId` | `{enabled,entry,files,pageAssets,extraFiles,intervalMs,extensions}`：热重载当前关注哪些文件 |
+| `packages` | `target`（`linux`/`win32`/`darwin`，别名 `windows`/`mac`）、`arch`（`x64`/`arm64`） | `{ok,manifest,version,electron,generatedAt,artifacts:[…],picked}`：按平台挑打包产物（zip 路径 / 解压后的可执行文件 / sha256 / 注意事项）；没有产物时 `error` 里给出生成命令 |
 | `shutdown` | — | 关闭该实例 |
 
 `sessionId` 可省略 —— 默认作用于「最近打开/聚焦」的会话。
+
+**浏览器身份**：预览默认自报同版本 Windows Chrome（UA / Client Hints / `navigator.platform` /
+`Accept-Language` 一致，不含 `Electron`、`AIBrowser`）。`ping` 返回的 `identity` 里有
+`mode` / `userAgent` / `summary`；想恢复 Electron 原始身份，用 `AIBROWSER_IDENTITY=native`
+（或 CLI `--native-ua`）启动服务。这层只改自报身份，不改 `navigator.webdriver`、不伪造指纹。
+
+### 打包产物（`packages`）
+
+各平台应用由 `npm run package -- --targets all` 产出，落在项目根 `release/`：
+
+```json
+{
+  "version": "0.1.0", "electron": "38.8.6",
+  "artifacts": [
+    { "platform": "win32", "arch": "x64", "ok": true,
+      "archive": "…/release/AIBrowser-0.1.0-win32-x64.zip",
+      "executableRel": "AIBrowser.exe", "cli": "…/pvs.cmd", "sha256": "…", "archiveBytes": 139967322 }
+  ],
+  "pick": { "win32-x64": { "archive": "…", "executable": "…", "cli": "…", "sha256": "…" } }
+}
+```
+
+解压后：`AIBrowser`（GUI）/ `AIBrowser --headless`（无头服务）/ `pvs`、`pvs.cmd`（命令行，不需要 node）。
+macOS 产物未签名（首次打开右键「打开」或 `xattr -dr com.apple.quarantine`）；交叉产物先在目标平台跑
+`AIBrowser --smoke-test --headless` 验证（18/18）。
 
 ## GUI 实例才能用的调试动作
 

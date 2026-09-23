@@ -53,7 +53,10 @@ node bin/pvs.js stop                                                  # 收工
 | `pvs reload [sessionId]` | 重新加载 | `--hard`（绕过缓存） |
 | `pvs close [sessionId]` | 关闭会话 | `--all` |
 | `pvs serve [--gui]` | 起常驻服务（`--gui` 开面板窗口，否则纯无头） | `--port n` |
-| `pvs status` / `pvs stop` | 控制入口信息 / 关闭服务 | `--json` |
+| `pvs status` / `pvs stop` | 控制入口信息 / 关闭服务 | `--json`（`status` 里含当前浏览器身份 `identity`） |
+| `pvs tree [dir]` | 列出目录（文件树同一套忽略规则） | `--all` 连 `node_modules`/`.git` 一起列 |
+| `pvs debugWatch` | 热重载当前盯着哪些文件 | `--json` |
+| `pvs packages` | 按平台挑打包产物（zip / 可执行文件 / sha256） | `--target linux\|win32\|darwin`、`--arch x64\|arm64`、`--json` |
 
 通用参数：`--json`、`--root <dir>`、`--daemon`（强制无头）、`--gui`（强制面板）、`--no-spawn`（不自动拉起）、`--quiet`。
 
@@ -203,6 +206,24 @@ node bin/pvs.js close --all --json
 
 ---
 
+### 3.10 跨平台打包与分发（让 AI 直接选应用文件）
+
+```bash
+npm run package -- --targets all      # linux + win32 + darwin（Electron 预编译包会自动取）
+pvs packages --target win32 --json    # 拿该平台的 zip / 解压后的可执行文件 / sha256
+```
+
+产物在 `release/`：每个平台一个 zip（自带 Electron 运行时 + asar 应用），解压即用；
+包内还有 `pvs` / `pvs.cmd`，用同一份应用以 Node 模式执行，**目标机器不需要 node / npm / 依赖**。
+`release/manifest.json` 的 `pick["<平台>-<架构>"]` 就是给 AI/脚本用的挑选入口（MCP：`browser_packages`）。
+
+- 交叉打包的产物先在目标平台验证：`AIBrowser --smoke-test --headless`（应为 18/18）。
+- macOS 未签名：首次打开右键「打开」或 `xattr -dr com.apple.quarantine`；要分发请自行签名公证。
+- 共享 `node_modules` 被另一平台 `npm install` 换过时：`npm run build` 会预检并提示补装
+  `@esbuild/<平台>-<架构>`；Electron 由 CLI 按平台自动挑（Windows 首选 `node_modules.win*`）。
+
+---
+
 ## 4. HTTP API（适合长驻、多次调用）
 
 ```bash
@@ -272,8 +293,8 @@ curl -s -X POST "http://127.0.0.1:$PORT/panelAction" -H "X-PVS-Token: $TOKEN" \
 ## 5. 自检与验收（改完代码后跑）
 
 ```bash
-npm run smoke     # 无头全链路 10 项：加载 → 取文本 → eval → 控制台 → 截图 → 像素校验
-npm run verify    # GUI 端到端 31 项：代码渲染 / 网页渲染 / 文件树点击 / 空标签 / 全屏 / 缩放 / 静置无重排
+npm run smoke     # 无头全链路 18 项：加载 → 取文本 → eval → 控制台 → 截图 → 像素校验 → 身份/EPIPE 兜底
+npm run verify    # GUI 端到端 72 项：代码渲染 / 网页渲染 / 文件树 / 热重载范围 / 批量 / 打包清单 / 全屏 / 缩放
 ```
 
 两者都用**客观证据**判定，而不是「进程起来了就算成功」：
@@ -293,6 +314,19 @@ npm run verify    # GUI 端到端 31 项：代码渲染 / 网页渲染 / 文件�
 7. **无头模式不会弹窗**：使用离屏渲染，适合后台长跑。
 8. **面板与无头互斥**：同一时刻只有一个进程持有控制通道，后启动者接管、旧实例退出，不需要手工清理。
 9. **`pvs stop` 之后**：下一条命令会自动重新拉起实例，不必手动 `serve`。
+10. **页面看到的不是 Electron**：默认自报同版本 Windows Chrome（UA / Client Hints / platform / languages
+    四处一致）。要确认真实情况看 `pvs status --json` 的 `identity`；排查时可用 `--native-ua` 关掉伪装。
+    这层只改「自报身份」，不碰 `navigator.webdriver`、不伪造指纹。
+11. **热重载范围很小**：只盯面板里打开的文件 + 该页面实际引用的资源（`pvs debugWatch` 可查），
+    没打开也没被引用的文件改了不会刷新 —— 这是刻意设计，避免日志/构建产物把预览刷成幻灯片。
+
+---
+
+### 只装打包版（无 node/npm）时的路径解析
+
+解压 `release/AIBrowser-<版本>-<平台>-<架构>.zip` 后把该目录加进 `PATH`（包内有 `pvs` / `pvs.cmd`），
+skill 的 `pvs.sh` 会命中「PATH 里的 pvs」这一档，之后所有命令都用这份应用；
+`ensure-service.sh` 也会照常用它拉起服务（打包版不需要 `PVS_HOME`）。
 
 ---
 
