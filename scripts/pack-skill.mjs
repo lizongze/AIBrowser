@@ -35,6 +35,8 @@ function parseArgs(argv) {
     else if (argv[i] === '--no-tar') out.tar = false;
     else if (argv[i] === '--unpacked') out.unpacked = true;
     else if (argv[i] === '--out-dir') out.outDir = String(argv[++i] || '');
+    else if (argv[i] === '--reuse') out.reuse = true;
+    else if (argv[i] === '--arch') out.arch = String(argv[++i] || 'x64');
     else if (argv[i] === '--from-cache') out.fromCache = true;
   }
   out.platforms = [...new Set(out.platforms.map((p) => (p === 'windows' ? 'win32' : p === 'mac' || p === 'macos' ? 'darwin' : p)))];
@@ -152,6 +154,89 @@ async function copySkillSkeleton(skillDir) {
   });
 }
 
+/**
+ * 登记一个已存在的产物（--reuse）：不重新打包，只算 sha256/大小，用于刷新索引。
+ */
+async function recordExisting(archivePath, platform, arch) {
+  const skillDir = path.join(os.tmpdir(), 'aibrowser-skill-build', 'aibrowser');
+  const manifestFile = path.join(skillDir, 'bundle', 'manifest.json');
+  let bundlePlatforms = null;
+  try {
+    bundlePlatforms = Object.keys(JSON.parse(fs.readFileSync(manifestFile, 'utf8')).platforms || {});
+  } catch {
+    /* 没有本地解包信息也无妨 */
+  }
+  return {
+    platform,
+    arch,
+    ok: true,
+    reused: true,
+    archive: archivePath,
+    archiveBytes: fs.statSync(archivePath).size,
+    sha256: sha256(archivePath),
+    builtAt: new Date(fs.statSync(archivePath).mtimeMs).toISOString(),
+    version: appVersion,
+    electron: electronVersion,
+    bundlePlatforms,
+  };
+}
+
+/**
+ * 索引文件：dist-skill/manifest.json 列出每个平台包的位置、sha256、大小、时间，
+ * 再配一份 README.txt 说明「只有 .tar.gz 是产物」——免得目录里出现个解包目录让人以为是产物。
+ */
+async function writeIndex(results, args) {
+  const manifestFile = path.join(outRoot, 'manifest.json');
+  const previous = (() => {
+    try {
+      return JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    } catch {
+      return { packages: [] };
+    }
+  })();
+  const merged = new Map();
+  for (const item of previous.packages || []) {
+    if (item && item.archive && fs.existsSync(item.archive)) merged.set(`${item.platform}-${item.arch}`, item);
+  }
+  for (const item of results) {
+    if (item.ok) merged.set(`${item.platform}-${item.arch}`, item);
+  }
+  const packages = [...merged.values()].sort((a, b) => String(a.platform).localeCompare(String(b.platform)));
+  const index = {
+    name: 'aibrowser-skill',
+    version: appVersion,
+    electron: electronVersion,
+    generatedAt: new Date().toISOString(),
+    host: `${process.platform}-${process.arch}`,
+    packages,
+    // 给 AI/脚本用：平台 → 该发给对方哪个文件
+    pick: Object.fromEntries(packages.map((item) => [`${item.platform}-${item.arch}`, {
+      archive: item.archive,
+      sha256: item.sha256,
+      bytes: item.archiveBytes,
+      bundlePlatforms: item.bundlePlatforms || null,
+    }])),
+  };
+  await fsp.writeFile(manifestFile, `${JSON.stringify(index, null, 2)}\n`, 'utf8');
+  await fsp.writeFile(path.join(outRoot, 'README.txt'), [
+    'AIBrowser —— 自带应用的 skill 分发包',
+    '',
+    '目录里只有这些是「产物」：',
+    '  aibrowser-skill-<版本>-<平台>-<架构>.tar.gz   发给别人的 skill 包（自带该平台的 AIBrowser）',
+    '  manifest.json                                 上面这些包的索引（sha256 / 大小 / 打包时间）',
+    '',
+    '用法（对方机器上）：',
+    '  tar -xzf aibrowser-skill-<...>.tar.gz',
+    '  cp -r aibrowser ~/.agents/skills/',
+    '  bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh',
+    '',
+    '注意：本目录里若出现 `aibrowser/` 解包目录，那是中间产物（正常不会生成，除非用了 --unpacked）。',
+    '      可以放心删除；若删不掉（Windows 侧占用 app.asar），重启后再删或从资源管理器删。',
+    '',
+  ].join('\n'), 'utf8');
+  return manifestFile;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   // 在系统临时目录（Linux 原生盘）里组装：repo 在 /mnt/d（drvfs）上，几千个小文件（含 15MB 的 app.asar）
@@ -163,11 +248,28 @@ async function main() {
   forceRemove(skillDir);
   await copySkillSkeleton(skillDir);
 
+  const staleUnpacked = path.join(outRoot, 'aibrowser');
+  if (fs.existsSync(staleUnpacked)) {
+    const removed = forceRemove(staleUnpacked);
+    process.stdout.write(removed
+      ? '[skill] 清掉上次遗留的解包目录 dist-skill/aibrowser\n'
+      : '[skill] 提示：dist-skill/aibrowser 是遗留的中间产物（删不掉：Windows 侧可能还占着 app.asar），\n'
+        + '        它不是产物，可稍后手动删除；这次只更新 tar.gz 与 manifest.json\n');
+  }
+
   const bundleRoot = path.join(skillDir, 'bundle');
   await fsp.mkdir(bundleRoot, { recursive: true });
   const platforms = {};
+  const results = [];
 
   for (const platform of args.platforms) {
+    const existingTar = path.join(outRoot, `aibrowser-skill-${appVersion}-${platform}-${args.arch}.tar.gz`);
+    if (args.reuse && fs.existsSync(existingTar)) {
+      process.stdout.write(`[skill] 复用已存在的 ${path.basename(existingTar)}\n`);
+      const entry = await recordExisting(existingTar, platform, args.arch);
+      results.push(entry);
+      continue;
+    }
     const zip = ensureReleaseZip(platform, args.arch, args.fromCache);
     if (!zip) {
       process.stdout.write(`[skill]   ✗ ${platform}-${args.arch}：没有 release 包，跳过\n`);
@@ -272,8 +374,24 @@ async function main() {
       process.stdout.write(`[skill] 分发包：${path.relative(root, tarPath)}（${Math.round(fs.statSync(tarPath).size / 1024 / 1024)}MB）\n`);
       process.stdout.write('         别人拿到后：tar -xzf <包> && cp -r aibrowser ~/.agents/skills/\n');
       info.archive = tarPath;
+      results.push({
+        platform: key.split('-')[0],
+        arch: key.split('-')[1],
+        ok: true,
+        archive: tarPath,
+        archiveBytes: fs.statSync(tarPath).size,
+        sha256: sha256(tarPath),
+        builtAt: new Date().toISOString(),
+        version: appVersion,
+        electron: electronVersion,
+        bundlePlatforms: Object.keys(platforms),
+        note: 'skill 包：自带应用，对方无需 node/npm',
+      });
     }
   }
+  const indexFile = await writeIndex(results, args);
+  process.stdout.write(`[skill] 索引：${path.relative(root, indexFile)}\n`);
+
   if (args.unpacked) {
     const unpacked = path.join(outRoot, 'aibrowser');
     if (forceRemove(unpacked) || !fs.existsSync(unpacked)) {
