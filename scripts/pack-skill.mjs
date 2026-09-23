@@ -206,13 +206,17 @@ async function copySkillSkeleton(skillDir) {
  * 登记一个已存在的产物（--reuse）：不重新打包，只算 sha256/大小，用于刷新索引。
  */
 async function recordExisting(archivePath, platform, arch) {
-  const skillDir = path.join(os.tmpdir(), 'aibrowser-skill-build', 'aibrowser');
-  const manifestFile = path.join(skillDir, 'bundle', 'manifest.json');
+  // 包里到底带了哪些平台，直接问压缩包本身（权威），别再依赖临时的组装目录
   let bundlePlatforms = null;
   try {
-    bundlePlatforms = Object.keys(JSON.parse(fs.readFileSync(manifestFile, 'utf8')).platforms || {});
+    const listing = execFileSync('tar', ['-tzf', archivePath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    bundlePlatforms = [...new Set(listing
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^aibrowser\/bundle\/[^/]+\/[^/]+$/.test(line) || /^aibrowser\/bundle\/[^/]+\/$/.test(line))
+      .map((line) => line.split('/')[2]))].filter(Boolean);
   } catch {
-    /* 没有本地解包信息也无妨 */
+    bundlePlatforms = null;
   }
   return {
     platform,
