@@ -132,8 +132,52 @@ fc-cache -f ~/.fonts
 | `sidebar` | **false** | 不显示左侧文件树 | `--show-sidebar` |
 | `hotReload` | **true** | 本地文件变化自动刷新预览 | `--no-hot-reload` / `--hot-reload` |
 | `uiScale` | 1 | 界面缩放 100% | `Ctrl+滚轮` |
+| `browserIdentity` | `chrome` | 对外自报同版本 Windows Chrome（见下节） | `--native-ua` / `AIBROWSER_IDENTITY=native` |
 
 全屏模式下按 `Esc` 或 `Ctrl+Shift+M` 可临时退出查看完整界面（退出状态会持久化）。
+
+## 共享的 node_modules 被另一平台覆盖（WSL ↔ Windows）
+
+一个 checkout 两边用（`/mnt/d` ↔ `D:`），只要在**一侧**执行 `npm install`，就会把**另一侧**的原生二进制换掉：
+
+| 症状 | 原因 | 处理 |
+| --- | --- | --- |
+| `spawn …/node_modules/electron/dist/electron.exe ENOENT`（WSL 里） | `node_modules/electron/path.txt` 被写成 `electron.exe`，`dist/` 里只剩 `resources/` | 用 `~/.cache/electron/electron-v<版本>-linux-x64.zip` 解开到 `node_modules/electron/dist/`，并把 `path.txt` 写回 `electron`；或 `node node_modules/electron/install.js` |
+| `npm run build` 报 `You installed esbuild for another platform` | `@esbuild/*` 只装了当前平台的那个 | `npm i --no-save @esbuild/linux-x64`（Windows 侧再装 `@esbuild/win32-x64`，两者可共存） |
+
+预防：`scripts/build.mjs` 现在会**预检**本平台的 esbuild 包，缺了就直接打印上面的修复命令；
+Windows 原生统一走 `run-native.cmd`（它在 `node_modules.win*` 里找 Windows 版依赖，不动共享目录）。
+判断依据是文件时间戳：`ls -la node_modules/electron/path.txt`（被覆盖那天的时间）。
+
+## 浏览器身份（对外表现得像 Chrome）
+
+预览默认自报**同版本 Windows Chrome**：
+
+```
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<真实 Chromium 版本> Safari/537.36
+```
+
+动机很实际：不少站点看到 UA 里的 `Electron/38.8.6` 或自定义产品名（`AIBrowser/0.1.0`）会走特殊分支 ——
+弹「请使用 Chrome 浏览器」、禁用某些 API、甚至直接拒绝服务，预览与截图就失去参考价值。
+
+做法是让**四处保持一致**（互相矛盾本身就很显眼）：
+
+| 位置 | 伪装前 | 伪装后 |
+| --- | --- | --- |
+| `navigator.userAgent` | `… AIBrowser/0.1.0 Chrome/140… Electron/38.8.6 …` | `… Chrome/140.0.7339.249 Safari/537.36` |
+| `navigator.userAgentData.brands` | `[Not=A?Brand 24, Chromium 140]` | `[Not=A?Brand 24, Chromium 140, **Google Chrome 140**]` |
+| `navigator.userAgentData.platform` / `navigator.platform` | `Linux` / `Linux x86_64` | `Windows` / `Win32` |
+| `navigator.languages` | `['en-US','c']` | `['zh-CN','zh','en']` |
+
+实现：`src/main/browser-identity.js`。UA 字符串先用 `app.userAgentFallback` + `webContents.setUserAgent` 同步设好
+（首个请求就必须是 Chrome），再用 CDP 的 `Network.setUserAgentOverride`（含 `userAgentMetadata`）把 UA‑CH 一起对齐 ——
+这是 Chromium 自己的机制，比在页面里改 `navigator` 更干净、也不会出现「JS 说是 Windows、请求头说 Linux」的破绽。
+
+**刻意不做的事**：不改 `navigator.webdriver`，不伪造插件 / 字体 / 画布 / WebGL 指纹，不做 TLS 指纹伪装。
+那是「对抗检测」的范畴，跟预览工具的定位无关；这里只解决「被当成 Electron 特殊对待」的兼容性问题。
+
+想关掉伪装（排查页面是否真的按 UA 分支）：`pvs serve --native-ua`，或 `AIBROWSER_IDENTITY=native`。
+当前生效的身份在启动日志里有一行，也可随时 `pvs runtime --json` / `ping` 动作查看。
 
 ## 热重载
 

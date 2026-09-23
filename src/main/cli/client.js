@@ -124,9 +124,9 @@ function waitForReady({ timeoutMs = 20000, startedAt = Date.now() } = {}) {
 
 /**
  * 确保有可用的控制入口，必要时拉起进程。
- * @param {{mode:'auto'|'daemon'|'gui', noSpawn?:boolean, port?:number, quiet?:boolean}} options
+ * @param {{mode:'auto'|'daemon'|'gui', noSpawn?:boolean, port?:number, quiet?:boolean, identity?:string}} options
  */
-async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = false } = {}) {
+async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = false, identity } = {}) {
   const prefer = mode === 'daemon' ? 'daemon' : mode === 'gui' ? 'gui' : 'auto';
   const found = await resolveTarget({ prefer });
   if (found.ok) return { state: found.state, spawned: false };
@@ -140,7 +140,7 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   const child = spawn(ELECTRON_BIN, args, {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, AIBROWSER_HEADLESS: '1' },
+    env: { ...process.env, AIBROWSER_HEADLESS: '1', ...(identity ? { AIBROWSER_IDENTITY: identity } : {}) },
   });
   child.unref();
   if (!quiet) writeStderr(`[pvs] 启动${headless ? '无头预览服务' : '预览面板'}（pid ${child.pid}）…`);

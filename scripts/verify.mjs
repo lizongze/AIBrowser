@@ -199,6 +199,36 @@ async function main() {
   check(value.cards === 3, 'Chromium 渲染出页面结构', `${value.cards} 张卡片`);
   check(value.title.includes('AIBrowser'), '页面标题正确', value.title);
 
+  // 浏览器身份：默认对外伪装成同版本 Chrome，且 UA / Client Hints / navigator 三处一致
+  const ping = await api('ping');
+  check(
+    ping.identity?.mode === 'chrome' && !/Electron|AIBrowser/.test(ping.identity.userAgent || ''),
+    '对外自报身份是 Chrome（UA 里没有 Electron/AIBrowser）',
+    ping.identity?.summary,
+  );
+  const fpRaw = await api('eval', {
+    expression: 'JSON.stringify({ua:navigator.userAgent, platform:navigator.platform, brands:(navigator.userAgentData||{}).brands||[], uadPlatform:(navigator.userAgentData||{}).platform, langs:navigator.languages, webdriver:navigator.webdriver})',
+  });
+  const fp = JSON.parse(fpRaw.value);
+  const chromeMajor = String(fp.ua).match(/Chrome\/(\d+)/)?.[1] || null;
+  check(Boolean(chromeMajor) && !/Electron|AIBrowser/.test(fp.ua), '页面里的 UA 就是 Chrome', String(fp.ua).slice(0, 76));
+  check(
+    fp.brands.some((b) => b.brand === 'Google Chrome' && b.version === chromeMajor)
+      && fp.brands.some((b) => b.brand === 'Chromium' && b.version === chromeMajor),
+    'Client Hints 品牌与 UA 版本一致',
+    JSON.stringify(fp.brands),
+  );
+  check(
+    fp.platform === 'Win32' && fp.uadPlatform === 'Windows',
+    'UA-CH platform 与 UA 字符串一致（不打架）',
+    `${fp.platform} / ${fp.uadPlatform}`,
+  );
+  check(
+    Array.isArray(fp.langs) && fp.langs[0] === 'zh-CN' && !fp.langs.some((l) => l.includes(';')),
+    'languages 正常（不会出现 zh;q=0.9 这种怪值）',
+    JSON.stringify(fp.langs),
+  );
+
   const shot = await api('screenshot', { format: 'png', out: path.join(root, '.aibrowser', 'verify-shot.png') });
   check(shot.bytes > 2000, '无头截图可用', `${shot.width}×${shot.height} · ${Math.round(shot.bytes / 1024)}KB`);
 

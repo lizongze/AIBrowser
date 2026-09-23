@@ -5,6 +5,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const { writeStdout, isStreamGone, write, handleCrash, crashLogPath } = require('./safe-io');
+const { resolveIdentity } = require('./browser-identity');
 
 function log(ok, message, extra) {
   writeStdout(`${ok ? '  ✓' : '  ✗'} ${message}${extra ? ` — ${extra}` : ''}`);
@@ -120,7 +121,22 @@ async function runSmokeTest({ manager, files, server, app }) {
     check(false, '代码文件语言识别', err.message);
   }
 
-  // 8. 日志/崩溃兜底：管道断开（EPIPE）不能把主进程弄崩，也不能弹模态框
+  // 8. 浏览器身份：默认伪装成同版本 Chrome，可用 native 关掉
+  const identity = resolveIdentity();
+  check(
+    identity.mode === 'chrome' && /^Mozilla\/5\.0 \(Windows NT 10\.0; Win64; x64\) .*Chrome\/\d+\.\d+\.\d+\.\d+ Safari\/537\.36$/.test(identity.userAgent)
+      && !/Electron|AIBrowser/.test(identity.userAgent),
+    '默认身份 = 同版本 Windows Chrome', identity.userAgent.slice(0, 64) + '…',
+  );
+  check(
+    identity.userAgentMetadata.brands.some((b) => b.brand === 'Google Chrome')
+      && identity.userAgentMetadata.platform === 'Windows',
+    'Client Hints 补齐 Google Chrome 并声明 Windows',
+    JSON.stringify(identity.userAgentMetadata.brands),
+  );
+  check(resolveIdentity({ mode: 'native' }).native === true, 'AIBROWSER_IDENTITY=native 可关掉伪装');
+
+  // 9. 日志/崩溃兜底：管道断开（EPIPE）不能把主进程弄崩，也不能弹模态框
   const { PassThrough } = require('node:stream');
   check(isStreamGone({ code: 'EPIPE' }) && !isStreamGone(new Error('boom')), '只把「管道断开」当可忽略错误', 'EPIPE / ERR_STREAM_DESTROYED …');
   const dead = new PassThrough();

@@ -9,8 +9,16 @@ const config = require('./config');
 // 直接写 stderr 会抛 EPIPE 并弹出「A JavaScript error occurred in the main process」。
 // 统一走 logErr：写不出去就丢弃，面板照常用。
 const { writeStderr: logErr, installCrashGuard } = require('./safe-io');
+const { resolveIdentity, describeIdentity, applyIdentity } = require('./browser-identity');
 // 弹窗兜底：管道断开之类的「错误」不该变成「A JavaScript error occurred in the main process」
 installCrashGuard();
+
+// 浏览器身份：默认让预览对外表现得像同版本 Chrome（UA 里不再出现 Electron / AIBrowser）。
+// 必须在创建任何窗口之前设好 —— 之后新建的 webContents 都会继承这个默认 UA。
+const IDENTITY = resolveIdentity();
+if (!IDENTITY.native) {
+  app.userAgentFallback = IDENTITY.userAgent;
+}
 
 // ---- WSL / 容器兼容：必须在 app ready 之前 ----
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
@@ -203,6 +211,7 @@ function registerIpc() {
   });
 
   handle('runtime', () => ({
+    identity: { mode: IDENTITY.mode, label: IDENTITY.label, userAgent: IDENTITY.userAgent },
     mode: state.mode,
     version: require('../../package.json').version,
     chrome: process.versions.chrome,
@@ -554,6 +563,7 @@ async function bootstrap() {
 
   // 守护进程把连接信息打到 stderr，便于脚本读取
   logErr(`[aibrowser] ${state.mode} · pid ${process.pid} · http://127.0.0.1:${state.server.port} · socket ${state.server.state.socket}\n`);
+  logErr(`[aibrowser] 浏览器身份 ${describeIdentity(IDENTITY)}${IDENTITY.native ? '（AIBROWSER_IDENTITY=native）' : ''}\n`);
 
   if (smokeTest) {
     const code = await runSmokeTest({ manager: state.manager, files, server: state.server, app });

@@ -85,6 +85,8 @@ function targetOptions(flags) {
     noSpawn: Boolean(flags['no-spawn']),
     port: flags.port ? Number(flags.port) : undefined,
     quiet: Boolean(flags.json) || Boolean(flags.quiet),
+    // 浏览器身份：默认伪装成同版本 Chrome；--native-ua 保留 Electron 原始身份（排查用）
+    identity: flags['native-ua'] || flags.identity === 'native' ? 'native' : flags.identity ? 'chrome' : undefined,
   };
 }
 
@@ -387,7 +389,11 @@ async function commandServe(_args, flags) {
   const child = spawn(ELECTRON_BIN, [projectRoot(), ...(wantGui ? [] : ['--headless']), ...guiFlags, ...(flags.port ? ['--port', String(flags.port)] : [])], {
     detached: true,
     stdio: ['ignore', logFile.fd, logFile.fd],
-    env: { ...process.env, ...(wantGui ? {} : { AIBROWSER_HEADLESS: '1' }) },
+    env: {
+      ...process.env,
+      ...(wantGui ? {} : { AIBROWSER_HEADLESS: '1' }),
+      ...(flags['native-ua'] || flags.identity === 'native' ? { AIBROWSER_IDENTITY: 'native' } : {}),
+    },
   });
   child.unref();
   const ready = await waitForReady({ timeoutMs: wantGui ? 30000 : 25000, startedAt });

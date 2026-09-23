@@ -11,6 +11,7 @@ const { PREVIEW_PARTITION } = require('./preview-protocol');
 const { detectLanguage } = require('./language');
 const { normalizePath } = require('./file-service');
 const { isWatchedFile, describeExtensions } = require('./watch-scope');
+const { applyIdentity, applyIdentitySync } = require('./browser-identity');
 
 // 在页面里收集它引用的本地资源。
 // 注意：Electron 对自定义 pvs:// 协议不产生 resource timing 条目（实测只有 navigation 与 http 请求），
@@ -193,6 +194,11 @@ class PreviewSession {
       this.view = null;
       this.webContents = this.window.webContents;
     }
+
+    // 浏览器身份：先把 UA 字符串同步设好（首个请求就得是 Chrome），
+    // 再用 CDP 覆盖 UA-CH / navigator.platform，避免 UA 与 Client Hints 互相矛盾。
+    applyIdentitySync(this.webContents);
+    applyIdentity(this.webContents).catch(() => {});
 
     this.wireWebContents();
     this.ctx.captureSession?.(this);

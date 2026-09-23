@@ -22,6 +22,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/main/main.js` | 应用引导。CLI 参数（`pvs` 与 `electron .` 共用）；`--headless` 走无头，否则建 GUI 窗口；全局开关：`--no-sandbox`、`--disable-gpu`、`--disable-dev-shm-usage`（WSL/容器必需）。 |
+| `src/main/browser-identity.js` | 对外自报身份：默认同版本 Windows Chrome（UA + UA-CH + `navigator.platform` + `Accept-Language` 一致）；`AIBROWSER_IDENTITY=native` 可关闭。只改自报身份，不做反检测。 |
 | `src/main/safe-io.js` | 日志出口：`writeStderr`/`writeStdout` 吞掉「对端已断开」（EPIPE / ERR_STREAM_DESTROYED）；`installCrashGuard()` 把 `uncaughtException` 记到 `<runtimeDir>/aibrowser-crash.log` 而不是弹模态框。 |
 | `src/main/watch-scope.js` | 热重载关注的类型白名单（前端/样式/模板/后端/数据接口/测试/配置/文档/资源，9 类 160 种后缀）。 |
 | `src/main/panel-shot.js` | 面板截图：切活动标签 + 截整个面板窗口，供控制 API 与批量任务共用（代码会话的原生视图是隐藏的，取不到帧）。 |

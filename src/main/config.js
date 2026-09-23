@@ -6,6 +6,8 @@ const { runtimeDir } = require('./control/state');
 
 const FILE = 'config.json';
 const DEFAULTS = {
+  // 浏览器身份：chrome = 对外伪装成同版本 Windows Chrome（默认）；native = 保留 Electron 原始身份
+  browserIdentity: 'chrome',
   uiScale: 1, // 面板界面缩放（1 = 100%）
   theme: 'light',
   sidebar: false, // 默认隐藏左侧文件树（纯净预览）

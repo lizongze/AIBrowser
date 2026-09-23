@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { bindSocket, runtimeDir, socketPath, writeState, env } = require('./state');
 const { activateSession, capturePanelShot, panelWindow } = require('../panel-shot');
+const { resolveIdentity, describeIdentity } = require('../browser-identity');
 
 const VERSION = require('../../../package.json').version;
 const MAX_BODY = 8 * 1024 * 1024;
@@ -358,11 +359,32 @@ class ControlServer {
 
   // ---------- 动作分发 ----------
 
+  /** 当前对外自报的浏览器身份（AI 与验收都用得到） */
+  static identityInfo() {
+    const identity = resolveIdentity();
+    return {
+      mode: identity.mode,
+      native: Boolean(identity.native),
+      label: identity.label,
+      userAgent: identity.userAgent,
+      acceptLanguage: identity.acceptLanguage || null,
+      summary: describeIdentity(identity),
+    };
+  }
+
   async dispatch(action, params = {}) {
     const manager = this.manager;
     switch (action) {
       case 'ping':
-        return { pong: true, pid: process.pid, mode: this.mode, version: VERSION, chrome: process.versions.chrome, port: this.port };
+        return {
+          pong: true,
+          pid: process.pid,
+          mode: this.mode,
+          version: VERSION,
+          chrome: process.versions.chrome,
+          port: this.port,
+          identity: ControlServer.identityInfo(),
+        };
 
       case 'open': {
         // fresh：先关掉所有旧会话，只留这一次打开的面板（AI 一条命令一个面板，不堆标签）

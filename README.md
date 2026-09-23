@@ -8,6 +8,10 @@
   侧栏顶部才出现「根目录」切换栏，一键切过去再切回来。
   文件树**默认忽略** `node_modules`（含 `node_modules.win2` 这类变体）、`.git`、构建产物与缓存目录（`pvs tree --all` 可列全）；
   点文件时高亮**立刻**落在点击的那一行，不等文件装载完；切换标签时高亮也跟着当前标签走。
+- 🕶️ **浏览器身份**：预览默认对外自报**同版本 Windows Chrome** —— UA、Client Hints（`Sec-CH-UA` / `navigator.userAgentData`）、
+  `navigator.platform`、`Accept-Language` 四处一致，不含 `Electron/…` 与 `AIBrowser/…` 标识，
+  免得站点看到 Electron 就走特殊分支（禁用能力、弹「请用 Chrome」、拒绝服务）而让预览结果失真。
+  只改「自报身份」这一层；要保留原始身份排查问题用 `--native-ua` 或 `AIBROWSER_IDENTITY=native`。
 - 🌐 **网页预览**：真正的 Chromium 渲染（不是 iframe 模拟），支持本地 `pvs://` 站点、相对路径 CSS/JS、历史前进后退、缩放、全页截图、按 CSS 选择器截图。
 - 🧩 **代码预览**：语法高亮覆盖 40+ 种语言，行号、折叠、自动换行、搜索（`Ctrl+F`），可直接编辑并 `Ctrl+S` 保存。
   代码区顶部依次显示 **文件名 · 语言类型 · 文件地址**（项目内显示相对路径、保留目录层级），全屏截图时一眼能看出这段代码在项目中的位置；空间不足时从左侧按目录段省略，始终保留文件名一侧。
@@ -147,7 +151,7 @@ npm link && pvs <命令>           # 或者安装到 PATH，之后可以直接 p
 | `pvs console [id] [--clear]` | 读取控制台日志 |
 | `pvs network [id] [--on\|--off] [--clear]` | 网络请求记录 |
 | `pvs reload [id] [--hard]` / `pvs close [id\|--all]` | 刷新 / 关闭会话 |
-| `pvs serve [--gui]` / `pvs stop` / `pvs status` | 常驻服务（`--gui` 开面板窗口，否则纯无头） |
+| `pvs serve [--gui]` / `pvs stop` / `pvs status` | 常驻服务（`--gui` 开面板窗口，否则纯无头）；`--native-ua` 保留 Electron 原始 UA |
 
 通用参数：`--json`（单行 JSON 输出，便于脚本与 AI 解析）、`--root <dir>`、`--daemon`、`--gui`、`--no-spawn`、`--quiet`。
 
@@ -230,6 +234,9 @@ docs/NOTES.md               额外说明（显示质量 / 字体 / 缩放 / Wind
 
 - **面板里网页区域空着？** 网页是原生视图覆盖在面板槽位上的，不是 DOM；先看状态栏与「控制台」里的加载错误。
 - **代码文件打开没内容？** 早期版本在容器隐藏时创建编辑器会渲染 0 行，现已强制重新测量；仍有问题就把 `pvs console` 与 `panelState` 发出来。
+- **站点说「不支持当前浏览器」/ 行为跟 Chrome 不一样？** 预览默认已伪装成同版本 Chrome（见上方特性）。
+  若仍被区别对待：先用 `pvs runtime --json` 看当前身份，再确认站点是不是在查 `navigator.webdriver`（我们保持 Chromium 默认的 `false`，不做改写）。
+  需要 Electron 原始身份时用 `pvs serve --native-ua`。
 - **开面板前弹「A JavaScript error occurred in the main process」？** 那是日志写进了已断开的管道（EPIPE）：
   拉起面板的 shell / cmd 退出后，`stderr` 就断了。现在 `pvs serve` 会把子进程日志写到
   `<runtimeDir>/gui.log`（或 `daemon.log`），写不出去的日志直接丢弃，未捕获异常记进
