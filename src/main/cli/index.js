@@ -302,6 +302,9 @@ async function commandStatus(_args, flags) {
     mode: state?.mode ?? null,
     version: state?.version ?? null,
     startedAt: state?.startedAt ?? null,
+    // 对外自报的浏览器身份：必须问「运行中的那个实例」——CLI 自己跑在普通 Node 里，
+    // process.versions.chrome 不存在，本地算出来的版本号会是兜底值，容易看岔。
+    identity: null,
     endpoint: state?.port ? `http://127.0.0.1:${state.port}` : null,
     sessions: null,
   };
@@ -313,12 +316,19 @@ async function commandStatus(_args, flags) {
     } catch {
       /* ignore */
     }
+    try {
+      const pong = await send('ping', {}, { state });
+      payload.identity = pong.identity || null;
+    } catch {
+      /* 老实例可能还没有这个字段 */
+    }
   }
   if (flags.json) {
     jsonOut(payload);
     return alive.ok ? EXIT_OK : EXIT_FAIL;
   }
   out(alive.ok ? `运行中 · ${payload.mode === 'gui' ? '面板窗口' : '无头服务'} · pid ${payload.pid}` : '未运行');
+  if (alive.ok && payload.identity) out(`  浏览器身份：${payload.identity.summary || payload.identity.mode}`);
   out(`  控制端口：${payload.port ?? '-'}`);
   out(`  socket  ：${payload.socket}`);
   out(`  令牌    ：${payload.token ?? '-'}`);
