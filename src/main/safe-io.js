@@ -60,8 +60,34 @@ function write(stream, text) {
   }
 }
 
+/**
+ * 日志文件（可选）：由拉起服务的 CLI 通过 AIBROWSER_LOG_FILE 指定。
+ * 为什么要它：为了让「拉起的子进程不继承调用方的 stdout/stderr 管道」，
+ * CLI 会以 stdio:'ignore' 方式启动应用（libuv 在三个 stdio 都是 ignore 时不再继承任何句柄，
+ * 否则长活的 GUI 子进程会一直握着调用方的管道，调用方永远等不到 EOF —— 表现就是「一直 pending」）。
+ * 代价是子进程拿不到我们的标准输出，所以改成应用自己往这个文件里写日志。
+ */
+const LOG_FILE = process.env.AIBROWSER_LOG_FILE || '';
+let logFd = null;
+
+function appendLogFile(text) {
+  if (!LOG_FILE) return;
+  try {
+    if (logFd === null) {
+      fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+      logFd = fs.openSync(LOG_FILE, 'a');
+    }
+    fs.writeSync(logFd, String(text));
+  } catch {
+    /* 日志写不进去不影响功能 */
+  }
+}
+
 /** 写 stderr（面板/守护进程的日志通道） */
-const writeStderr = (text) => write(process.stderr, text);
+const writeStderr = (text) => {
+  appendLogFile(text);
+  return write(process.stderr, text);
+};
 
 /** 写 stdout */
 const writeStdout = (text) => write(process.stdout, text);
@@ -138,7 +164,42 @@ function installCrashGuard({ dialog = process.env.AIBROWSER_CRASH_DIALOG === '1'
 
 const INSTALLED = Symbol.for('aibrowser.crashGuard');
 
+/**
+ * 释放从父进程继承来的标准输入/输出/错误句柄。
+ *
+ * 背景：agent 用管道读我们的输出（PowerShell / Node 的 child_process），而我们在被拉起后
+ * 又 spawn 出长活的 GUI/服务进程。Windows 上 Node 创建子进程时会带上句柄继承，
+ * 长活进程于是握着调用方的管道不放 —— 调用方读不到 EOF，命令就一直「pending」。
+ * 被 CLI 拉起时带上 AIBROWSER_DETACHED=1，这里在 app 启动最早期把这几个句柄关掉；
+ * 之后的日志由 AIBROWSER_LOG_FILE 指定的文件承载（见 writeStderr）。
+ */
+function releaseInheritedStdio() {
+  if (process.env.AIBROWSER_DETACHED !== '1') return false;
+  let closed = 0;
+  for (const stream of [process.stdin, process.stdout, process.stderr]) {
+    try {
+      if (stream && typeof stream.destroy === 'function') stream.destroy();
+      closed += 1;
+    } catch {
+      /* 忽略 */
+    }
+  }
+  // fd 层面也关一次：destroy() 不一定立刻释放底层 HANDLE
+  if (process.platform === 'win32') {
+    const fsMod = require('node:fs');
+    for (const fd of [0, 1, 2]) {
+      try {
+        fsMod.closeSync(fd);
+      } catch {
+        /* 已关闭或不存在 */
+      }
+    }
+  }
+  return closed > 0;
+}
+
 module.exports = {
+  releaseInheritedStdio,
   isStreamGone,
   guardStream,
   write,

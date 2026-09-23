@@ -82,13 +82,16 @@ describe() {
 }
 
 start() {
-  local mode="$1"
+  local mode="$1" i
+  # 用 --detach 拉起（立刻返回），再由本脚本轮询 status 确认就绪。
+  # 为什么不用阻塞式 serve：agent 的 shell 包装器（无控制台 + 管道的 PowerShell 等）
+  # 会在 serve 等待就绪期间一直挂着，表现就是「命令 pending、拿不到回传」。
   if [ "$mode" = gui ]; then
     echo "[aibrowser] 启动面板服务（GUI）..."
-    "$pv" serve --gui --json >/dev/null 2>&1 || "$pv" serve --gui >/dev/null 2>&1 || true
+    "$pv" serve --gui --detach --json >/dev/null 2>&1 || "$pv" serve --gui --detach >/dev/null 2>&1 || true
   else
     echo "[aibrowser] 启动无头服务 ..."
-    "$pv" serve --json >/dev/null 2>&1 || "$pv" serve >/dev/null 2>&1 || true
+    "$pv" serve --detach --json >/dev/null 2>&1 || "$pv" serve --detach >/dev/null 2>&1 || true
   fi
 }
 

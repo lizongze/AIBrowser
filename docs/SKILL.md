@@ -59,7 +59,7 @@ node bin/pvs.js stop                                                  # 收工
 | `pvs network [sessionId]` | 网络请求记录 | `--on` / `--off` / `--clear` |
 | `pvs reload [sessionId]` | 重新加载 | `--hard`（绕过缓存） |
 | `pvs close [sessionId]` | 关闭会话 | `--all` |
-| `pvs serve [--gui]` | 起常驻服务（`--gui` 开面板窗口，否则纯无头） | `--port n` |
+| `pvs serve [--gui]` | 起常驻服务（`--gui` 开面板窗口，否则纯无头） | `--port n`、`--detach`（拉起即返回，配合 `status` 轮询；agent 包装器不会被挂住） |
 | `pvs status` / `pvs stop` | 控制入口信息 / 关闭服务 | `--json`（`status` 里含当前浏览器身份 `identity`） |
 | `pvs tree [dir]` | 列出目录（文件树同一套忽略规则） | `--all` 连 `node_modules`/`.git` 一起列 |
 | `pvs debugWatch` | 热重载当前盯着哪些文件 | `--json` |

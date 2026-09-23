@@ -118,6 +118,17 @@ node <项目>/bin/pvs.js serve --gui --json
 有 `DISPLAY` / `WAYLAND_DISPLAY` 就开面板窗口，这样代码截图是**整块面板**（标签条 + 行号栏 + 文件地址），
 和用户屏幕上看到的一致。纯无头服务没有窗口，代码截图会回退成 `pvs://code/` 代码页，**只有文件内容、没有标签条**。
 需要纯无头（CI、无显示环境）时用 `AIBROWSER_GUI=0 bash scripts/ensure-service.sh`。
+
+**启动服务请用 `serve --detach`**（拉起后立刻返回，再用 `status` 确认），不要用阻塞式 `serve`：
+
+```bash
+$P serve --gui --detach --json    # 立刻返回 {"ok":true,"spawning":true,...}
+$P status --json                  # 轮询到 running:true 即可开始用
+```
+
+原因：阻塞式 `serve` 要等服务就绪才返回，而 agent 的 shell 包装器（尤其是**无控制台 + 管道**的
+PowerShell）会在我们等待期间一直挂着，表现为「命令一直 pending、拿不到回传」。`ensure-service.sh`
+内部已经改成 `--detach` + 轮询，所以直接调它最省事。
 服务是常驻进程：仓库代码比服务新、或服务模式不是想要的，`ensure-service.sh` 会自动重启它。
 
 ## 核心命令

@@ -7,6 +7,23 @@ const path = require('node:path');
 const { readState, probe, pidAlive, runtimeDir, env } = require('../control/state');
 const { writeStderr } = require('../safe-io');
 
+/** 打开子进程的日志文件（超过 2MB 先清空），并让应用自己往里写（AIBROWSER_LOG_FILE） */
+function setupChildLog(name) {
+  try {
+    const dir = runtimeDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${name}.log`);
+    try {
+      if (fs.statSync(file).size > 2 * 1024 * 1024) fs.writeFileSync(file, '');
+    } catch {
+      /* 文件不存在就新建 */
+    }
+    return { path: file };
+  } catch {
+    return { path: null };
+  }
+}
+
 function projectRoot() {
   return path.resolve(__dirname, '..', '..', '..');
 }
@@ -152,8 +169,21 @@ function waitForReady({ timeoutMs = 20000, startedAt = Date.now() } = {}) {
         return;
       }
       const state = readState();
+      if (process.env.AIBROWSER_DEBUG_WAIT === '1') {
+        const why = !state ? 'no-state'
+          : state.startedAt < startedAt - 250 ? `stale-startedAt(${state.startedAt}<${startedAt})`
+            : !pidAlive(state.pid) ? `pid-dead(${state.pid})` : 'probe';
+        const detail = why === 'probe' ? (await probe(state, { timeoutMs: 800 })) : null;
+        writeStderr(`[pvs] wait 第 ${Math.round((Date.now() - startedAt) / 1000)}s: ${why}${detail ? ` → ${detail.ok ? 'ok' : detail.reason}` : ''}`);
+      }
       if (state && state.startedAt >= startedAt - 250 && pidAlive(state.pid)) {
-        const alive = await probe(state, { timeoutMs: 800 });
+        let alive = await probe(state, { timeoutMs: 800 });
+        // 兜底：管道不可用（例如上一个实例的命名管道还占着、或平台对管道路径判断不一致）时，
+        // 用 HTTP /health 再确认一次 —— 否则 serve 会一直等到超时，调用方看着就是「命令卡住」。
+        if (!alive.ok && state.port) {
+          const http = await requestOverHttp(state.port, 'health', {}, { token: state.token, timeoutMs: 900 }).catch(() => null);
+          if (http && http.ok !== false) alive = { ok: true, state, via: 'http' };
+        }
         if (alive.ok) {
           resolve({ ok: true, state });
           return;
@@ -186,9 +216,13 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   const childEnv = { ...process.env, AIBROWSER_HEADLESS: '1' };
   delete childEnv.ELECTRON_RUN_AS_NODE;
   if (identity) childEnv.AIBROWSER_IDENTITY = identity;
+  // 同上：自动拉起服务时也不继承调用方的管道（否则调用方可能等不到 EOF）
+  const logFile = setupChildLog('daemon');
+  if (logFile.path) childEnv.AIBROWSER_LOG_FILE = logFile.path;
+  childEnv.AIBROWSER_DETACHED = '1'; // 子进程启动时释放继承句柄（见 safe-io.releaseInheritedStdio）
   const child = spawn(ELECTRON_BIN, args, {
     detached: true,
-    stdio: 'ignore',
+    stdio: 'ignore', // 三个都 ignore：不让子进程继承调用方的 stdout/stderr 管道
     env: childEnv,
   });
   child.unref();

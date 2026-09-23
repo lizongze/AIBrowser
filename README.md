@@ -218,7 +218,7 @@ npm link && pvs <命令>           # 或者安装到 PATH，之后可以直接 p
 | `pvs console [id] [--clear]` | 读取控制台日志 |
 | `pvs network [id] [--on\|--off] [--clear]` | 网络请求记录 |
 | `pvs reload [id] [--hard]` / `pvs close [id\|--all]` | 刷新 / 关闭会话 |
-| `pvs serve [--gui]` / `pvs stop` / `pvs status` | 常驻服务（`--gui` 开面板窗口，否则纯无头）；`--native-ua` 保留 Electron 原始 UA；建议带 `--json` |
+| `pvs serve [--gui]` / `pvs stop` / `pvs status` | 常驻服务（`--gui` 开面板窗口，否则纯无头）；`--native-ua` 保留 Electron 原始 UA；`--detach` 拉起即返回（agent 调用推荐，配合 `status` 轮询）；建议带 `--json` |
 | `pvs packages [--target win32\|linux\|darwin] [--json]` | 列出已打包的各平台应用（按平台挑 zip / 可执行文件 / sha256） |
 
 通用参数：`--json`（单行 JSON 输出，便于脚本与 AI 解析）、`--root <dir>`、`--daemon`、`--gui`、`--no-spawn`、`--quiet`。

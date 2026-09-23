@@ -439,22 +439,56 @@ async function commandServe(_args, flags) {
   // 必须把这个变量摘掉：留着的话子进程会以 Node 模式执行应用目录，起不来（表现为「启动超时」）。
   const childEnv = { ...process.env };
   delete childEnv.ELECTRON_RUN_AS_NODE;
+  // 让应用自己把日志写进这个文件（下面 stdio 用 ignore，子进程拿不到我们的标准输出）
+  if (logFile.path) childEnv.AIBROWSER_LOG_FILE = logFile.path;
+  // 告诉子进程「你是被拉起来的常驻服务」：它会在启动最早期释放继承来的 stdin/stdout/stderr，
+  // 否则长活进程会一直握着调用方的管道，调用方永远等不到 EOF（表现为命令 pending）。
+  childEnv.AIBROWSER_DETACHED = '1';
   const guiFlags = [];
   if (flags.fullscreen) guiFlags.push('--fullscreen');
   if (flags['no-fullscreen']) guiFlags.push('--no-fullscreen');
   if (flags['show-sidebar']) guiFlags.push('--show-sidebar');
   // 打包版：可执行文件自带应用，不需要再传应用目录
   const appArg = process.env.AIBROWSER_PACKAGED === '1' ? [] : [projectRoot()];
-  const child = spawn(ELECTRON_BIN, [...appArg, ...(wantGui ? [] : ['--headless']), ...guiFlags, ...(flags.port ? ['--port', String(flags.port)] : [])], {
+  // stdio 三个都用 ignore：libuv 只有在「没有任何 stdio 需要继承」时才不传 bInheritHandles，
+  // 否则长活的 GUI 子进程会继承调用方（agent 的 shell）的 stdout/stderr 管道并一直握着，
+  // 调用方永远等不到 EOF → 表现就是「命令一直 pending、拿不到回传」。日志改由应用自己写文件。
+  const childArgs = [...appArg, ...(wantGui ? [] : ['--headless']), ...guiFlags, ...(flags.port ? [`--port=${flags.port}`] : [])];
+  // 直接 spawn + detached + stdio:'ignore'：子进程拿 NUL 作为标准流，不再继承调用方的管道。
+  // （试过 `cmd /c start`，反而让 start 静默失败、服务起不来；日志靠 AIBROWSER_LOG_FILE 写文件。）
+  // Windows：用 PowerShell 的 Start-Process 拉起（ShellExecuteEx 路径，不会继承本进程的句柄）。
+  // 直接 spawn 时 libuv 会带上句柄继承，长活的 GUI 进程于是握着调用方（agent 的 shell）的 stdout 管道，
+  // 调用方永远读不到 EOF —— 表现就是「命令一直 pending」。Git Bash / cmd 链路不受影响，只有
+  // 「无控制台的 PowerShell + 管道」这种 harness 链路会中招，所以在这里显式绕开。
+  const child = (process.platform === 'win32'
+    ? spawn('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+      `Start-Process -FilePath '${ELECTRON_BIN.replace(/'/g, "''")}' `
+      + `-ArgumentList @(${childArgs.map((a) => `'${String(a).replace(/'/g, "''")}'`).join(', ')}) `
+      + '-WindowStyle Hidden',
+    ], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, ...childEnv } })
+    : spawn(ELECTRON_BIN, childArgs, {
     detached: true,
-    stdio: ['ignore', logFile.fd, logFile.fd],
+    stdio: 'ignore',
+    windowsHide: true,
     env: {
       ...childEnv,
       ...(wantGui ? {} : { AIBROWSER_HEADLESS: '1' }),
       ...(flags['native-ua'] || flags.identity === 'native' ? { AIBROWSER_IDENTITY: 'native' } : {}),
-    },
-  });
+      },
+    }));
   child.unref();
+  // --detach：不等就绪，立刻返回（调用方自己去轮询 status）。
+  // 用途：agent 的 shell 包装器（尤其是无控制台 + 管道的 PowerShell）会在我们等待期间
+  // 一直挂着，表现就是「命令 pending」。给它一个立刻返回的选项最省事。
+  if (flags.detach || flags.background) {
+    const info = { ok: true, spawning: true, pid: child.pid || null, mode: wantGui ? 'gui' : 'daemon',
+      note: '服务在后台启动中；用 pvs status 确认（pvs status --json 会返回 running/port/socket/token）' };
+    if (flags.json) jsonOut(info);
+    else out(`已在后台启动${wantGui ? '预览面板' : '无头预览服务'} · pid ${info.pid || '?'}（用 pvs status 确认就绪）`);
+    child.unref();
+    process.exit(EXIT_OK);
+  }
   const ready = await waitForReady({ timeoutMs: wantGui ? 30000 : 25000, startedAt });
   if (!ready.ok) {
     errOut('启动超时');

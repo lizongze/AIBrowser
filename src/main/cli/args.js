@@ -17,7 +17,7 @@ const BOOLEAN_FLAGS = new Set([
   'help', 'version', 'json', 'new', 'daemon', 'gui', 'headless', 'no-spawn',
   'full-page', 'hard', 'clear', 'html', 'on', 'off', 'all', 'quiet', 'verbose', 'open', 'force-daemon',
   'hot-reload', 'no-hot-reload', 'win', 'wsl',
-  'fresh', 'keep', 'native-ua', 'text', 'human', 'no-json',
+  'fresh', 'keep', 'native-ua', 'text', 'human', 'no-json', 'detach', 'background',
   'fullscreen', 'no-fullscreen', 'show-sidebar',
 ]);
 
@@ -100,7 +100,8 @@ const HELP = `AIBrowser (pvs) — Chromium 网页预览 + 代码高亮预览，A
 
  输出格式：默认按「有没有终端」判断 —— 管道/重定向捕获（AI、脚本）用单行 JSON，终端里用人读文本；
            --json / --text（--human）/ AIBROWSER_FORMAT=json|text 可强制。
-  pvs serve [--gui] [--port n] [--native-ua]              常驻服务：--gui 开面板窗口，否则无头守护
+  pvs serve [--gui] [--port n] [--native-ua] [--detach]   常驻服务：--gui 开面板窗口，否则无头守护
+                                                          --detach 拉起后立刻返回（不等就绪，自己轮询 status）
                                                           --native-ua 保留 Electron 原始 UA（默认伪装成同版本 Chrome）
   pvs stop                                                关闭常驻服务
 

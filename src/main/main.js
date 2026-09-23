@@ -8,7 +8,7 @@ const config = require('./config');
 // 日志出口：拉起面板的父进程（agent shell / npm / cmd）退出后管道会断，
 // 直接写 stderr 会抛 EPIPE 并弹出「A JavaScript error occurred in the main process」。
 // 统一走 logErr：写不出去就丢弃，面板照常用。
-const { writeStderr: logErr, installCrashGuard } = require('./safe-io');
+const { writeStderr: logErr, installCrashGuard, releaseInheritedStdio } = require('./safe-io');
 const { resolveIdentity, describeIdentity, applyIdentity } = require('./browser-identity');
 // 弹窗兜底：管道断开之类的「错误」不该变成「A JavaScript error occurred in the main process」
 installCrashGuard();
@@ -19,6 +19,11 @@ const IDENTITY = resolveIdentity();
 if (!IDENTITY.native) {
   app.userAgentFallback = IDENTITY.userAgent;
 }
+
+// 被其它进程「拉起来当常驻服务」时，我们继承了拉起方（agent 的 shell / CLI）的
+// stdin/stdout/stderr 管道；这份长活的进程若一直握着它，拉起方就永远等不到管道关闭（EOF），
+// 于是「命令一直 pending、拿不到回传」。启动最早期就把这几个继承来的句柄放掉。
+releaseInheritedStdio();
 
 // ---- WSL / 容器兼容：必须在 app ready 之前 ----
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
