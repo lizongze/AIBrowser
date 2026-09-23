@@ -361,14 +361,30 @@ async function commandServe(_args, flags) {
   }
   const { spawn } = require('node:child_process');
   const { projectRoot, waitForReady } = require('./client');
-  const ELECTRON_BIN = require('electron');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  // electron 二进制可能因平台不匹配而缺失（如 Linux 版 dist 落在 Windows 上）。
+  // 此时尝试用 ELECTRON_OVERRIDE_DIST_PATH 指向同仓库内的备用 dist（node_modules.win2）。
+  let ELECTRON_BIN = require('electron');
+  if (!fs.existsSync(ELECTRON_BIN)) {
+    const fallback = path.resolve(projectRoot(), 'node_modules.win2', 'node_modules', 'electron', 'dist');
+    if (fs.existsSync(path.join(fallback, 'electron.exe'))) {
+      process.env.ELECTRON_OVERRIDE_DIST_PATH = fallback;
+      delete require.cache[require.resolve('electron')];
+      ELECTRON_BIN = require('electron');
+    }
+  }
   const startedAt = Date.now();
   // 子进程的 stdout/stderr 落盘到 <runtimeDir>/<mode>.log，而不是继承父进程的管道：
   // 拉起面板的 agent shell / cmd 随时会退出，继承的管道一断，子进程每次写日志都会拿到
   // EPIPE（Windows 上就是「A JavaScript error occurred in the main process」弹窗）。
   // 落盘既避免这个问题，也留下可查的启动日志。
   const logFile = setupChildLog(wantGui ? 'gui' : 'daemon');
-  const child = spawn(ELECTRON_BIN, [projectRoot(), ...(wantGui ? [] : ['--headless']), ...(flags.port ? ['--port', String(flags.port)] : [])], {
+  const guiFlags = [];
+  if (flags.fullscreen) guiFlags.push('--fullscreen');
+  if (flags['no-fullscreen']) guiFlags.push('--no-fullscreen');
+  if (flags['show-sidebar']) guiFlags.push('--show-sidebar');
+  const child = spawn(ELECTRON_BIN, [projectRoot(), ...(wantGui ? [] : ['--headless']), ...guiFlags, ...(flags.port ? ['--port', String(flags.port)] : [])], {
     detached: true,
     stdio: ['ignore', logFile.fd, logFile.fd],
     env: { ...process.env, ...(wantGui ? {} : { AIBROWSER_HEADLESS: '1' }) },

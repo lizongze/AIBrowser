@@ -495,7 +495,7 @@ async function bootstrap() {
     const cfg = config.read();
     const fullscreen = flags['no-fullscreen'] === true ? false
       : flags.fullscreen === true ? true
-        : cfg.contentOnly !== false;
+        : true;
     const showSidebar = flags['show-sidebar'] === true ? true
       : flags['hide-sidebar'] === true ? false
         : cfg.sidebar === true;

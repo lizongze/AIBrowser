@@ -24,8 +24,9 @@ function normalizePath(input) {
       ? require('node:fs').readFileSync('/proc/version', 'utf8') : ''));
 
   // UNC：\\wsl.localhost\<distro>\... 或 \\wsl$\<distro>\...
+  // 仅在 WSL 里回写为 Linux 路径；Windows 上保持 UNC 原样以便 Electron 直接访问
   const unc = raw.match(/^\\\\wsl(?:\$|\.localhost)\\[^\\]+[\\/]?(.*)$/i);
-  if (unc) {
+  if (unc && isWsl) {
     const rest = unc[1].replace(/\\/g, '/');
     return `/${rest}`.replace(/\/{2,}/g, '/');
   }
