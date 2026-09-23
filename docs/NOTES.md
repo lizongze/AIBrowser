@@ -171,6 +171,7 @@ Electron 运行时 + 应用代码（asar）打成一个 zip，并写 `release/ma
 | asar 与 shim | `resources/app.asar` 是文件不是目录，shim 里判断存在性要看 `app.asar` 本身（`-f $APP/bin/pvs.js` 永远为假） |
 | macOS | 未签名：首次打开右键「打开」或 `xattr -dr com.apple.quarantine`；本机（Linux）无法验证运行，只能产出文件 |
 | 校验 | 交叉产物务必在目标平台跑 `AIBrowser --smoke-test --headless`（应为 18/18）；Windows 产物本次实测就是这个结果 |
+| 参数只按逗号分隔 | 两个打包脚本的多值参数只认逗号（`--targets linux,win32`、`--platforms linux,win32`、`--arch x64,arm64`），开头打印「目标：…」。踩过的坑：写成空格分隔时后一个平台被当成无关位置参数**静默丢掉**，只打出一个平台，人会以为脚本坏了；现在这种参数会明确警告 |
 
 ## 共享的 node_modules 被另一平台覆盖（WSL ↔ Windows）
 

@@ -27,20 +27,39 @@ const outRoot = path.join(root, 'dist-skill');
 const { version: appVersion, devDependencies = {} } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const electronVersion = String(devDependencies.electron || '').replace(/^[^\d]*/, '');
 
+const KNOWN_PLATFORMS = new Set(['linux', 'win32', 'darwin', 'windows', 'win', 'mac', 'macos', 'osx', 'all']);
+
+function normalizePlatformName(value) {
+  const raw = String(value).trim().toLowerCase();
+  if (raw === 'windows' || raw === 'win') return 'win32';
+  if (raw === 'mac' || raw === 'macos' || raw === 'osx') return 'darwin';
+  return raw;
+}
+
+/**
+ * 解析参数：多个值**用逗号分隔**（`--platforms linux,win32`、`--arch x64,arm64`）。
+ * 认不出来的参数会明确警告（空格分隔会被当成无关参数，以前是静默丢掉）。
+ */
 function parseArgs(argv) {
-  const out = { platforms: ['linux'], arch: process.arch === 'arm64' ? 'arm64' : 'x64', tar: true, fromCache: false, unpacked: false, outDir: null };
+  const out = { platforms: [], arch: [], tar: true, fromCache: false, unpacked: false, outDir: null, reuse: false, combined: false, unknown: [] };
+  const split = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--platforms') out.platforms = String(argv[++i] || '').split(',').map((s) => s.trim()).filter(Boolean);
-    else if (argv[i] === '--arch') out.arch = String(argv[++i] || 'x64');
-    else if (argv[i] === '--no-tar') out.tar = false;
-    else if (argv[i] === '--unpacked') out.unpacked = true;
-    else if (argv[i] === '--out-dir') out.outDir = String(argv[++i] || '');
-    else if (argv[i] === '--reuse') out.reuse = true;
-    else if (argv[i] === '--combined') out.combined = true;
-    else if (argv[i] === '--arch') out.arch = String(argv[++i] || 'x64');
-    else if (argv[i] === '--from-cache') out.fromCache = true;
+    const token = argv[i];
+    if (token === '--platforms') out.platforms.push(...split(argv[++i]));
+    else if (token === '--arch') out.arch.push(...split(argv[++i]));
+    else if (token === '--no-tar') out.tar = false;
+    else if (token === '--unpacked') out.unpacked = true;
+    else if (token === '--out-dir') out.outDir = String(argv[++i] || '');
+    else if (token === '--reuse') out.reuse = true;
+    else if (token === '--combined') out.combined = true;
+    else if (token === '--from-cache') out.fromCache = true;
+    else out.unknown.push(token);
   }
-  out.platforms = [...new Set(out.platforms.map((p) => (p === 'windows' ? 'win32' : p === 'mac' || p === 'macos' ? 'darwin' : p)))];
+  if (!out.platforms.length) out.platforms = [process.platform];
+  if (out.platforms.some((p) => String(p).toLowerCase() === 'all')) out.platforms = ['linux', 'win32', 'darwin'];
+  out.platforms = [...new Set(out.platforms.map(normalizePlatformName))];
+  out.archList = out.arch.length ? [...new Set(out.arch)] : [process.arch === 'arm64' ? 'arm64' : 'x64'];
+  delete out.arch;
   return out;
 }
 
@@ -296,7 +315,11 @@ async function main() {
   // 最终只往 repo 里放一个 tar.gz（单文件，不会被锁），需要解包目录时用 --unpacked。
   const buildRoot = args.outDir ? path.resolve(args.outDir) : path.join(os.tmpdir(), 'aibrowser-skill-build');
   const skillDir = path.join(buildRoot, 'aibrowser');
-  process.stdout.write(`[skill] 组装自包含 skill：${args.platforms.join(' / ')} · ${args.arch}\n`);
+  if (args.unknown.length) {
+    process.stdout.write(`[skill] 忽略了不认识的参数：${args.unknown.join(' ')}`
+      + '（多个平台用逗号分隔：--platforms linux,win32）\n');
+  }
+  process.stdout.write(`[skill] 组装自包含 skill：${args.platforms.join(' / ')} · ${args.archList.join(',')}\n`);
   forceRemove(skillDir);
   await copySkillSkeleton(skillDir);
 
@@ -315,19 +338,20 @@ async function main() {
   const results = [];
 
   for (const platform of args.platforms) {
-    const existingTar = path.join(outRoot, `aibrowser-skill-${appVersion}-${platform}-${args.arch}.tar.gz`);
+    for (const arch of args.archList) {
+    const existingTar = path.join(outRoot, `aibrowser-skill-${appVersion}-${platform}-${arch}.tar.gz`);
     if (args.reuse && fs.existsSync(existingTar)) {
       process.stdout.write(`[skill] 复用已存在的 ${path.basename(existingTar)}\n`);
-      const entry = await recordExisting(existingTar, platform, args.arch);
+      const entry = await recordExisting(existingTar, platform, arch);
       results.push(entry);
       continue;
     }
-    const zip = ensureReleaseZip(platform, args.arch, args.fromCache);
+    const zip = ensureReleaseZip(platform, arch, args.fromCache);
     if (!zip) {
-      process.stdout.write(`[skill]   ✗ ${platform}-${args.arch}：没有 release 包，跳过\n`);
+      process.stdout.write(`[skill]   ✗ ${platform}-${arch}：没有 release 包，跳过\n`);
       continue;
     }
-    const key = `${platform}-${args.arch}`;
+    const key = `${platform}-${arch}`;
     const dest = path.join(bundleRoot, key);
     process.stdout.write(`[skill]   解包 ${path.basename(zip)} → bundle/${key}\n`);
     extractZip(zip, dest);
@@ -364,7 +388,7 @@ async function main() {
     }
     platforms[key] = {
       platform,
-      arch: args.arch,
+      arch,
       dir: `bundle/${key}`,
       executable: path.join(`bundle/${key}`, exe),
       cli: path.join(`bundle/${key}`, cli),
@@ -374,6 +398,7 @@ async function main() {
       version: appVersion,
     };
     process.stdout.write(`[skill]   ✓ ${key}（${Math.round(dirSize(dest) / 1024 / 1024)}MB）\n`);
+    }
   }
 
   const manifest = {

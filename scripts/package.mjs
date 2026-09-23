@@ -51,17 +51,35 @@ const IGNORE = [
   /^\/run-native\.cmd$/,
 ];
 
+const KNOWN_PLATFORMS = new Set(['linux', 'win32', 'darwin', 'windows', 'win', 'mac', 'macos', 'osx', 'all']);
+
+function normalizePlatformName(value) {
+  const raw = String(value).trim().toLowerCase();
+  if (raw === 'windows' || raw === 'win') return 'win32';
+  if (raw === 'mac' || raw === 'macos' || raw === 'osx') return 'darwin';
+  return raw;
+}
+
+/**
+ * 解析参数：多个值**用逗号分隔**（`--targets linux,win32`、`--arch x64,arm64`）。
+ * 认不出来的参数会明确警告（踩过坑：写成空格分隔时后一个平台被静默丢掉，只打出一个平台，
+ * 人会以为脚本坏了 —— 现在至少会说出来）。
+ */
 function parseArgs(argv) {
-  const out = { targets: null, arch: process.arch === 'arm64' ? 'arm64' : 'x64', keepDir: false };
+  const out = { targets: [], arch: [], keepDir: false, skipExisting: false, unknown: [] };
+  const split = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--targets') out.targets = String(argv[++i] || '').split(',').map((s) => s.trim()).filter(Boolean);
-    else if (argv[i] === '--arch') out.arch = String(argv[++i] || 'x64');
-    else if (argv[i] === '--keep-dir') out.keepDir = true;
-    else if (argv[i] === '--skip-existing') out.skipExisting = true;
+    const token = argv[i];
+    if (token === '--targets') out.targets.push(...split(argv[++i]));
+    else if (token === '--arch') out.arch.push(...split(argv[++i]));
+    else if (token === '--keep-dir') out.keepDir = true;
+    else if (token === '--skip-existing') out.skipExisting = true;
+    else out.unknown.push(token);
   }
-  if (!out.targets || !out.targets.length) out.targets = [process.platform];
-  if (out.targets.includes('all')) out.targets = ['linux', 'win32', 'darwin'];
-  out.targets = [...new Set(out.targets.map((t) => (t === 'mac' || t === 'macos' ? 'darwin' : t === 'windows' ? 'win32' : t)))];
+  if (!out.targets.length) out.targets = [process.platform];
+  if (out.targets.some((t) => String(t).toLowerCase() === 'all')) out.targets = ['linux', 'win32', 'darwin'];
+  out.targets = [...new Set(out.targets.map(normalizePlatformName))];
+  out.archList = out.arch.length ? [...new Set(out.arch)] : [process.arch === 'arm64' ? 'arm64' : 'x64'];
   return out;
 }
 
@@ -435,6 +453,12 @@ async function packageOne(platform, arch, options) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   process.stdout.write(`[package] AIBrowser ${appVersion} · Electron ${electronVersion}\n`);
+  if (args.unknown.length) {
+    process.stdout.write(`[package] 忽略了不认识的参数：${args.unknown.join(' ')}`
+      + '（多个平台用逗号分隔：--targets linux,win32）\n');
+  }
+  process.stdout.write(`[package] 目标：${args.targets.flatMap((p) => args.archList.map((a) => `${p}-${a}`)).join(' ')}`
+    + `${args.skipExisting ? '  （已存在的产物直接复用）' : ''}\n`);
   try {
     execFileSync(process.execPath, [path.join(scriptDir, 'build.mjs')], { cwd: root, stdio: 'inherit' });
   } catch {
@@ -444,7 +468,7 @@ async function main() {
   await fsp.mkdir(releaseDir, { recursive: true });
   const results = [];
   for (const platform of args.targets) {
-    for (const arch of String(args.arch).split(',')) {
+    for (const arch of args.archList) {
       process.stdout.write(`[package] 打包 ${platform}-${arch} …\n`);
       try {
         const result = await packageOne(platform, arch, args);

@@ -51,10 +51,16 @@ Windows 原生运行下的界面（全屏模式：只留标签条，标题栏与
 ```bash
 npm run package                          # 当前平台
 npm run package -- --targets all         # linux + win32 + darwin（能下到 Electron 就行）
+npm run package -- --targets linux,win32 # 多平台：值用逗号分隔
 npm run package -- --targets win32       # 交叉打 Windows 包（复用 node_modules.win* 里的现成 dist，离线可用）
+npm run package -- --targets linux --skip-existing   # 已有产物就复用（只刷新清单）
 pvs packages --json                      # 列出产物（AI 按平台挑文件）
 pvs packages --target win32 --json       # 只挑 Windows 的
 ```
+
+每个平台一份产物（Electron 运行时是原生的，不能跨平台共用）；多平台**值用逗号分隔**
+（`--targets linux,win32`、`--arch x64,arm64`）；开头会打印「目标：linux-x64 win32-x64」，
+认不出来的参数会明确警告，不会静默忽略。
 
 产物落在 `release/`（已 gitignore）：
 
@@ -89,8 +95,9 @@ MCP 里对应 `browser_packages` 工具，CLI 里对应 `pvs packages`。
 > `scripts/ensure-service.sh`；没有包且没有仓库时问用户要，不要自己猜路径。
 
 ```bash
-npm run skill -- --platforms linux                 # 打出「skill + 自带应用」
-npm run skill -- --platforms linux,win32,darwin    # 一份 skill 带多平台（体积大）
+npm run skill -- --platforms linux                 # 打出「skill + 自带应用」（linux 一份）
+npm run skill -- --platforms linux,win32           # 多平台＝多份包（每份只带自己的平台）
+npm run skill -- --platforms all --combined        # 想要「一份包带多平台」时加 --combined
 # → dist-skill/aibrowser-skill-0.1.0-linux-x64.tar.gz（111MB）
 ```
 
