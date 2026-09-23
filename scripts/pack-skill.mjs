@@ -456,7 +456,7 @@ async function main() {
         builtAt: new Date().toISOString(),
         version: appVersion,
         electron: electronVersion,
-        bundlePlatforms: Object.keys(platforms),
+        bundlePlatforms: [key], // 这一份包里只有这个平台（--combined 时才是全部）
         note: 'skill 包：自带应用，对方无需 node/npm',
       });
     }
