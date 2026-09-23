@@ -82,6 +82,26 @@ MCP 里对应 `browser_packages` 工具，CLI 里对应 `pvs packages`。
 > macOS 产物未签名：首次打开需右键「打开」或 `xattr -dr com.apple.quarantine`；要分发给别人请自行签名/公证。
 > 交叉打包出来的包请务必在目标平台跑一次自检：`AIBrowser --smoke-test --headless`（应输出 18/18）。
 
+### 连 skill 一起打包（别人只要这个 skill 就能用）
+
+```bash
+npm run skill -- --platforms linux                 # 打出「skill + 自带应用」
+npm run skill -- --platforms linux,win32,darwin    # 一份 skill 带多平台（体积大）
+# → dist-skill/aibrowser-skill-0.1.0-linux-x64.tar.gz（111MB）
+```
+
+别人拿到压缩包后：
+
+```bash
+tar -xzf aibrowser-skill-0.1.0-linux-x64.tar.gz
+cp -r aibrowser ~/.agents/skills/          # 全局；或 <项目>/.agents/skills/
+bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh
+```
+
+**不需要 clone 本项目、不需要 npm install、不需要装 node** —— skill 里自带 Electron 应用，
+脚本会优先用它（`bundle/<平台>-<架构>/`），找不到才回退到 `$PVS_HOME`（开发）或 `PATH` 里的 `pvs`。
+自带平台与 sha256 见包内 `bundle/manifest.json`，用法见包内 `BUNDLE.md`。
+
 ## 快速开始
 
 ```bash

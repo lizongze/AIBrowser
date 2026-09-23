@@ -1,11 +1,70 @@
 #!/usr/bin/env bash
-# 解析 AIBrowser 项目目录，供 pvs.sh / ensure-service.sh 共用。
-# 解析顺序：
-#   1) $PVS_HOME / $AIBROWSER_HOME（显式指定最优先）
-#   2) 安装时写入的 ~/.aibrowser-skill.env（install.sh 生成，解决符号链接安装的情形）
-#   3) 从本文件所在目录逐级向上查找含 bin/pvs.js 的目录（skill 与项目同仓库时命中）
-#   4) PATH 里的 pvs（npm link 安装）
+# 解析 AIBrowser 的位置，供 pvs.sh / ensure-service.sh 共用。
+#
+# 两条路：
+#   A) skill 自带应用（推荐给只想用 skill 的人）：<skill>/bundle/<平台>-<架构>/ 里有打包好的
+#      AIBrowser 与 pvs / pvs.cmd，不需要项目、node、npm。用 resolve_bundle_dir 取。
+#   B) 项目目录（开发者）：$PVS_HOME → ~/.aibrowser-skill.env → 逐级向上找 bin/pvs.js → PATH 的 pvs。
+#      用 resolve_aibrowser_home 取（返回 "PATH" 表示用命令本身）。
+#
 # 成功时把绝对路径写到 stdout；失败返回 1。
+
+# 当前平台 key（与 scripts/pack-skill.mjs 生成的 bundle 目录名一致）
+bundle_platform_key() {
+  local os arch
+  case "$(uname -s)" in
+    Linux*) os=linux ;;
+    Darwin*) os=darwin ;;
+    MINGW* | MSYS* | CYGWIN*) os=win32 ;;
+    *) os=unknown ;;
+  esac
+  case "$(uname -m)" in
+    x86_64 | amd64) arch=x64 ;;
+    aarch64 | arm64) arch=arm64 ;;
+    *) arch="$(uname -m)" ;;
+  esac
+  echo "${os}-${arch}"
+}
+
+# skill 自带应用目录（没有就返回 1）
+resolve_bundle_dir() {
+  local skill_dir bundle os
+  skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -L)"
+  # 显式指定优先（同一份 skill 里带了多平台时可以用它切换）
+  if [ -n "${AIBROWSER_BUNDLE:-}" ] && [ -d "${AIBROWSER_BUNDLE}" ]; then
+    echo "$AIBROWSER_BUNDLE"
+    return 0
+  fi
+  bundle="$skill_dir/bundle/$(bundle_platform_key)"
+  if [ -d "$bundle" ]; then
+    echo "$bundle"
+    return 0
+  fi
+  # 平台没带全时，退一步：只要目录里只有一个平台，就用它
+  if [ -d "$skill_dir/bundle" ]; then
+    local dirs=()
+    for d in "$skill_dir"/bundle/*/; do [ -d "$d" ] && dirs+=("$d"); done
+    if [ "${#dirs[@]}" -eq 1 ]; then
+      echo "${dirs[0]%/}"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# 自带应用里的命令行入口（Windows 是 pvs.cmd）
+bundle_cli() {
+  local dir="$1"
+  if [ -f "$dir/pvs" ]; then
+    echo "$dir/pvs"
+    return 0
+  fi
+  if [ -f "$dir/pvs.cmd" ]; then
+    echo "$dir/pvs.cmd"
+    return 0
+  fi
+  return 1
+}
 set -uo pipefail
 
 _here() {

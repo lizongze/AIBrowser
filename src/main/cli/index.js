@@ -206,11 +206,16 @@ async function commandTree(args, flags) {
 
 async function commandPackages(_args, flags) {
   const { projectRoot } = require('./client');
-  const { readManifest, pickArtifacts, summarize } = require('../release-manifest');
-  const { file, manifest } = readManifest(projectRoot());
+  const { readManifest, normalizeManifest, pickArtifacts, summarize } = require('../release-manifest');
+  const read = readManifest(projectRoot());
+  const file = read.file;
+  const manifest = normalizeManifest(read.manifest, read.source);
   if (!manifest) {
-    if (flags.json) jsonOut({ ok: false, error: `还没有打包产物（缺 ${file}）。先运行：npm run package -- --targets all` });
-    else errOut(`还没有打包产物（缺 ${file}）。\n先运行：npm run package -- --targets all`);
+    const hint = process.env.AIBROWSER_PACKAGED === '1'
+      ? '这是打包版运行：没有 release/ 清单。要列出各平台产物，请在项目里跑 npm run package -- --targets all，或用带 bundle 的 skill（清单在 bundle/manifest.json）'
+      : `还没有打包产物（缺 ${file}）。先运行：npm run package -- --targets all`;
+    if (flags.json) jsonOut({ ok: false, error: hint });
+    else errOut(hint);
     return EXIT_FAIL;
   }
   const target = flags.target || flags.platform || null;
@@ -228,7 +233,8 @@ async function commandPackages(_args, flags) {
     });
     return wanted.length ? EXIT_OK : EXIT_FAIL;
   }
-  out(`AIBrowser ${manifest.version} · Electron ${manifest.electron} · 清单生成于 ${manifest.generatedAt}`);
+  out(`AIBrowser ${manifest.version} · Electron ${manifest.electron} · 清单生成于 ${manifest.generatedAt}`
+    + (manifest.source === 'bundle' ? '（来源：skill 自带 bundle）' : ''));
   if (!wanted.length) {
     const available = (manifest.artifacts || []).map((a) => `${a.platform}-${a.arch}${a.ok ? '' : '(失败)'}`).join(', ') || '（无）';
     errOut(`清单里没有匹配的产物（${[target, arch].filter(Boolean).join('-') || '任意平台'}）；已有：${available}`);
@@ -237,7 +243,11 @@ async function commandPackages(_args, flags) {
   }
   out('');
   for (const a of wanted) {
-    out(`${a.platform}-${a.arch}  ${Math.round(a.archiveBytes / 1024 / 1024)}MB  ${a.archive}`);
+    if (a.bundled) {
+      out(`${a.platform}-${a.arch}  skill 自带（${Math.round((a.archiveBytes || 0) / 1024 / 1024)}MB）  ${a.archive}`);
+    } else {
+      out(`${a.platform}-${a.arch}  ${Math.round(a.archiveBytes / 1024 / 1024)}MB  ${a.archive}`);
+    }
     out(`  可执行文件（解压后）：${a.executableRel}`);
     out(`  命令行入口：${path.basename(a.cli || '')}（用同一份应用，无需 node/npm）`);
     out(`  sha256：${String(a.sha256).slice(0, 16)}…   ${a.note || ''}`);
@@ -425,6 +435,10 @@ async function commandServe(_args, flags) {
   // EPIPE（Windows 上就是「A JavaScript error occurred in the main process」弹窗）。
   // 落盘既避免这个问题，也留下可查的启动日志。
   const logFile = setupChildLog(wantGui ? 'gui' : 'daemon');
+  // 打包版的 pvs 是「Node 模式」跑起来的（ELECTRON_RUN_AS_NODE=1），子进程要当真正的应用启动，
+  // 必须把这个变量摘掉：留着的话子进程会以 Node 模式执行应用目录，起不来（表现为「启动超时」）。
+  const childEnv = { ...process.env };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
   const guiFlags = [];
   if (flags.fullscreen) guiFlags.push('--fullscreen');
   if (flags['no-fullscreen']) guiFlags.push('--no-fullscreen');
@@ -435,7 +449,7 @@ async function commandServe(_args, flags) {
     detached: true,
     stdio: ['ignore', logFile.fd, logFile.fd],
     env: {
-      ...process.env,
+      ...childEnv,
       ...(wantGui ? {} : { AIBROWSER_HEADLESS: '1' }),
       ...(flags['native-ua'] || flags.identity === 'native' ? { AIBROWSER_IDENTITY: 'native' } : {}),
     },

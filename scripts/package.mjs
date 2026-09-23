@@ -31,6 +31,10 @@ const electronVersion = String(devDependencies.electron || '').replace(/^[^\d]*/
 // 打包时不需要进包的东西：源码仓库的元数据、开发脚本、各平台的依赖目录、验收产物
 const IGNORE = [
   /^\/release($|\/)/,
+  /^\/dist-skill($|\/)/,     // skill 自包含打包的中间产物（含整份应用！漏了会让 asar 翻倍）
+  /^\/skills\/aibrowser\/bundle($|\/)/,
+  /^\/aibrowser-shots($|\/)/,
+  /^\/[^/]+\.tar\.gz$/,
   /^\/gen($|\/)/,
   /^\/screenshots($|\/)/,
   /^\/\.temp($|\/)/,

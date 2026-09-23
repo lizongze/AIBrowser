@@ -322,11 +322,20 @@ npm run verify    # GUI 端到端 72 项：代码渲染 / 网页渲染 / 文件�
 
 ---
 
-### 只装打包版（无 node/npm）时的路径解析
+### skill 自带应用（别人只拿 skill 就能用）
 
-解压 `release/AIBrowser-<版本>-<平台>-<架构>.zip` 后把该目录加进 `PATH`（包内有 `pvs` / `pvs.cmd`），
-skill 的 `pvs.sh` 会命中「PATH 里的 pvs」这一档，之后所有命令都用这份应用；
-`ensure-service.sh` 也会照常用它拉起服务（打包版不需要 `PVS_HOME`）。
+`npm run skill -- --platforms <平台>` 会打出「skill + 自带应用」的 tar.gz；
+解压后 `cp -r aibrowser ~/.agents/skills/` 即可，不需要项目、node、npm：
+
+```bash
+tar -xzf aibrowser-skill-0.1.0-linux-x64.tar.gz
+cp -r aibrowser ~/.agents/skills/
+bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh
+```
+
+`pvs.sh` 的解析顺序：项目目录（`$PVS_HOME` / 安装记录 / 同仓库 / `PATH` 的 pvs）→ **skill 自带 bundle/**。
+自带平台按 `uname` 判定（`bundle/linux-x64`、`bundle/win32-x64`、`bundle/darwin-arm64`…），
+可用 `AIBROWSER_BUNDLE=<目录>` 指定；清单在 `bundle/manifest.json`，说明在包内 `BUNDLE.md`。
 
 ---
 

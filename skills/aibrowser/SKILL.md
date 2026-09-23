@@ -30,9 +30,19 @@ bash scripts/ensure-service.sh      # 确保后台服务已就绪（幂等，见
 `$PVS_HOME` → `$AIBROWSER_HOME` → 同仓库内的副本 → `PATH` 里的 `pvs`。
 若都找不到，向用户询问项目路径并设置 `export PVS_HOME=/path/to/aibrowser`。
 
-**只有打包版（没装 node/npm）时**：解压 `release/AIBrowser-<版本>-<平台>-<架构>.zip`，
-把目录加进 `PATH`（里面有 `pvs` / `pvs.cmd`），本 skill 会自动走 `PATH` 那一档 —— 后续所有命令
-（`open` / `shot` / `batch` / `packages` …）都用这份应用，不需要项目目录。
+**这份 skill 可以自带应用（推荐给只想用的人）**：如果目录里有 `bundle/<平台>-<架构>/`
+（例如 `bundle/linux-x64/`），脚本会**优先用它**——不需要项目、node、npm：
+
+```bash
+tar -xzf aibrowser-skill-<版本>-<平台>.tar.gz
+cp -r aibrowser ~/.agents/skills/          # 全局；或 <项目>/.agents/skills/
+bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh
+```
+
+- 自带平台的判定：`uname -s`/`uname -m` → `linux-x64` / `darwin-arm64` / `win32-x64`…
+  同一份 skill 里可以带多个平台，脚本会挑当前这个；也可以用 `AIBROWSER_BUNDLE=<目录>` 指定。
+- 详情见 skill 根目录的 `BUNDLE.md`（由 `npm run skill` 生成），各平台可执行文件与 sha256 在 `bundle/manifest.json`。
+- 没带 bundle 时，脚本按老顺序解析：`$PVS_HOME` → 安装记录 → 同仓库副本 → `PATH` 里的 `pvs`（开发用）。
 
 **一条命令 = 一个面板（重要）**：本 skill 的 `scripts/pvs.sh` 会给 `open` / `code` 自动加 `--fresh` ——
 打开新文件前先关掉之前所有面板，避免 AI 连开几个文件后堆出一排标签（热重载也只盯当前这个文件）。

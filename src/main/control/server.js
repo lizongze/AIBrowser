@@ -604,8 +604,10 @@ class ControlServer {
 
       // 打包产物清单：按平台挑「该用哪个应用文件」（AI 通过 HTTP/socket 也能问）
       case 'packages': {
-        const { readManifest, pickArtifacts, summarize } = require('../release-manifest');
-        const { file, manifest } = readManifest(path.resolve(__dirname, '..', '..', '..'));
+        const { readManifest, normalizeManifest, pickArtifacts, summarize } = require('../release-manifest');
+        const read = readManifest(path.resolve(__dirname, '..', '..', '..'));
+        const file = read.file;
+        const manifest = normalizeManifest(read.manifest, read.source);
         if (!manifest) {
           return { ok: false, manifest: file, artifacts: [], error: '还没有打包产物，先运行：npm run package -- --targets all' };
         }

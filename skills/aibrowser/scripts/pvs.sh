@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # AIBrowser skill 的 CLI 包装脚本：找到 AIBrowser，并把命令转交给它的 pvs CLI。
-# 解析逻辑见同目录的 resolve-home.sh（支持 $PVS_HOME / 安装记录 / 同仓库副本 / PATH）。
+# 顺序：项目目录（$PVS_HOME / 安装记录 / 同仓库副本 / PATH 里的 pvs）→ skill 自带应用 bundle/。
+# 前者优先是为了「开发时改了代码立刻生效」；别人只拿到 skill 时前者找不到，自然用自带的 bundle。
+# 平台探测与路径规则见同目录的 resolve-home.sh。
 #
 # 与裸 pvs 的差别：**一条命令 = 一个面板**。
 #   open / code 默认加 --fresh：打开新的文件面板前先关掉之前所有面板，
@@ -31,6 +33,7 @@ else
   final=("${args[@]}" --fresh)
 fi
 
+# 1) 项目目录（开发者：$PVS_HOME / 安装记录 / 同仓库 / PATH 里的 pvs）
 if home="$(resolve_aibrowser_home)"; then
   if [ "$home" = "PATH" ]; then
     exec pvs "${final[@]}"
@@ -38,10 +41,21 @@ if home="$(resolve_aibrowser_home)"; then
   exec node "$home/bin/pvs.js" "${final[@]}"
 fi
 
+# 2) skill 自带应用（别人只拿 skill 时走这里：不需要项目、node、npm）
+if bundle="$(resolve_bundle_dir)"; then
+  if cli="$(bundle_cli "$bundle")"; then
+    # 让应用知道「这份 skill 带了哪些平台的应用」（pvs packages 会读它）。
+    # 注意清单在 bundle/manifest.json（bundle 的上一层），不在平台目录里。
+    export AIBROWSER_BUNDLE_MANIFEST="$(dirname "$bundle")/manifest.json"
+    exec "$cli" "${final[@]}"
+  fi
+fi
+
 cat >&2 <<'MSG'
-[aibrowser-skill] 找不到 AIBrowser 项目目录。任选一种方式解决：
-  1) export PVS_HOME=/path/to/aibrowser      # 指向含 bin/pvs.js 的项目目录
-  2) bash <skill>/install.sh                 # 重新安装（会记录路径到 ~/.aibrowser-skill.env）
+[aibrowser-skill] 找不到可用的 AIBrowser。任选一种方式解决：
+  1) 用自带应用的 skill（推荐）：这份 skill 里应有 bundle/<平台>-<架构>/ 与其中的 pvs / pvs.cmd；
+     用 `node scripts/pack-skill.mjs --platforms <平台>` 打一份，或向提供方索取带 bundle 的版本。
+  2) export PVS_HOME=/path/to/aibrowser      # 指向含 bin/pvs.js 的项目目录（开发用）
   3) cd /path/to/aibrowser && npm link       # 把 pvs 装进 PATH
 MSG
 exit 1

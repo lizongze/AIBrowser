@@ -5,3 +5,4 @@ dist/
 .aibrowser/
 gen/
 release/
+dist-skill/

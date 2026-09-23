@@ -136,6 +136,23 @@ fc-cache -f ~/.fonts
 
 全屏模式下按 `Esc` 或 `Ctrl+Shift+M` 可临时退出查看完整界面（退出状态会持久化）。
 
+## skill 自带应用（别人只拿 skill 就能用）
+
+`npm run skill -- --platforms <平台>` 把「skill 文档 + 脚本 + 一份打包好的应用」组装成
+`dist-skill/aibrowser-skill-<版本>-<平台>.tar.gz`。别人解压后 `cp -r aibrowser ~/.agents/skills/` 即可，
+**不需要项目、node、npm**。
+
+| 关键点 | 做法 |
+| --- | --- |
+| 脚本怎么找到自带应用 | `resolve-home.sh` 里 `resolve_bundle_dir()` 按 `uname -s/-m` 拼出 `bundle/<平台>-<架构>`，再退回「只有一个平台就用它」；`pvs.sh` 把 `AIBROWSER_BUNDLE_MANIFEST` 传给应用 |
+| 谁优先 | 先在项目目录（`$PVS_HOME` → 安装记录 → 同仓库 → `PATH` 的 pvs）里找，找不到才用自带 bundle —— 开发时改代码立刻生效，别人拿到 skill 时自然走 bundle |
+| 组装在哪 | 在系统临时目录（Linux 原生盘）里组装，最终只往 repo 放一个 tar.gz：repo 在 `/mnt/d`（drvfs）上，几千个小文件（含 15MB 的 app.asar）刚写出来就可能被 Windows 侧占用，覆盖/删除直接 EACCES |
+| 依赖裁剪 | `@codemirror/*`、`@lezer/*`、`codemirror` 已在构建时被 esbuild 打进 `dist/renderer.js`，运行时用不到 → 移到 devDependencies，asar 从 313MB 降到 **6MB**（应用包 118MB→111MB） |
+| 别把中间产物打进去 | 打包时若 `dist-skill/` 没被 ignore，会把整份自带应用塞进 asar（asar 直接翻倍）。`scripts/package.mjs` 的 IGNORE 已加 `dist-skill`、`skills/aibrowser/bundle`、`*.tar.gz` |
+| 打包版 CLI 的坑 | 自带应用里的 `pvs` 是 `ELECTRON_RUN_AS_NODE=1` 跑的；`pvs serve` 拉起子进程时必须**摘掉这个变量**，否则子进程也以 Node 模式启动 → 永远起不来（表现为「启动超时」） |
+| 清单位置 | skill 的清单在 `bundle/manifest.json`（**bundle 的上一层**，不在平台目录里）；`pvs packages` 会优先读它，列出「这份 skill 带了哪些平台」 |
+| install.sh | 检测到 `bundle/` 就默认**复制**安装（不建符号链接），也不写 `~/.aibrowser-skill.env`（自带应用不需要项目目录），并且只装用户级目录（下载目录的上级未必是项目） |
+
 ## 跨平台打包（release/ 与 manifest.json）
 
 `npm run package -- --targets linux,win32,darwin` 会为每个平台产出一个「拿起来就能跑」的应用：

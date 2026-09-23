@@ -182,17 +182,14 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   // 打包版：可执行文件自带应用，不需要再传应用目录
   const appArg = process.env.AIBROWSER_PACKAGED === '1' ? [] : [projectRoot()];
   const args = [...appArg, '--headless', ...(port ? ['--port', String(port)] : [])];
+  // 打包版 CLI 自己是以「Node 模式」跑的，子进程要当真正的应用启动：必须摘掉这个变量
+  const childEnv = { ...process.env, AIBROWSER_HEADLESS: '1' };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+  if (identity) childEnv.AIBROWSER_IDENTITY = identity;
   const child = spawn(ELECTRON_BIN, args, {
     detached: true,
     stdio: 'ignore',
-    env: {
-      ...process.env,
-      AIBROWSER_HEADLESS: '1',
-      ...(identity ? { AIBROWSER_IDENTITY: identity } : {}),
-      // 打包版 CLI 自己是以「Node 模式」跑的，子进程要当真正的应用启动
-      ELECTRON_RUN_AS_NODE: undefined,
-      AIBROWSER_PACKAGED: process.env.AIBROWSER_PACKAGED || undefined,
-    },
+    env: childEnv,
   });
   child.unref();
   if (!quiet) writeStderr(`[pvs] 启动${headless ? '无头预览服务' : '预览面板'}（pid ${child.pid}）…`);

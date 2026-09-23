@@ -12,25 +12,20 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "watch": "node scripts/build.mjs --watch",
-    "start": "npm run build && electron .",
     "dev": "npm run build && concurrently -k \"node scripts/build.mjs --watch\" \"electron .\"",
     "gui": "node bin/pvs.js serve --gui",
-    "smoke": "npm run build && electron . --smoke-test --headless",
-    "verify": "npm run build && node scripts/verify.mjs",
-    "panel:check": "electron scripts/panel-check.cjs",
     "mcp": "node bin/aibrowser-mcp.js",
-    "postinstall": "node scripts/install-skill.mjs",
     "package": "node scripts/package.mjs",
-    "package:all": "node scripts/package.mjs --targets all"
+    "package:all": "node scripts/package.mjs --targets all",
+    "panel:check": "electron scripts/panel-check.cjs",
+    "postinstall": "node scripts/install-skill.mjs",
+    "skill": "node scripts/pack-skill.mjs",
+    "smoke": "npm run build && electron . --smoke-test --headless",
+    "start": "npm run build && electron .",
+    "verify": "npm run build && node scripts/verify.mjs",
+    "watch": "node scripts/build.mjs --watch"
   },
   "devDependencies": {
-    "@electron/packager": "^20.3.0",
-    "concurrently": "^9.1.2",
-    "electron": "^38.8.6",
-    "esbuild": "^0.25.0"
-  },
-  "dependencies": {
     "@codemirror/commands": "^6.8.0",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
@@ -52,8 +47,14 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.36.4",
+    "@electron/packager": "^20.3.0",
     "@lezer/highlight": "^1.2.1",
     "codemirror": "^6.0.1",
+    "concurrently": "^9.1.2",
+    "electron": "^38.8.6",
+    "esbuild": "^0.25.0"
+  },
+  "dependencies": {
     "highlight.js": "^11.12.0"
   }
 }
