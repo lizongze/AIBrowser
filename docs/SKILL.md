@@ -93,8 +93,15 @@ $P serve --gui --json                        # 没跑就启动
 until $P status --json | grep -q '"running":true'; do sleep 0.5; done   # 轮询到就绪（通常 2-3s）
 ```
 
+**Windows（PowerShell）实测最稳的写法**——直接拉起应用本体，不经过 CLI（老包也能用）：
+
+```powershell
+$B = "<skill>\bundle\win32-x64"
+Start-Process -FilePath "$B\AIBrowser.exe" -ArgumentList "--gui" -WindowStyle Hidden   # 无头换成 "--headless"
+for ($i = 0; $i -lt 20; $i++) { Start-Sleep -Milliseconds 500; if ((& "$B\pvs.cmd" status --json) -match '"running":true') { break } }
+```
+
 - 已经在跑（`status` 里 `"running":true`）就不用重复启动。
-- Windows 上 cmd / PowerShell 用 `bundle\win32-x64\pvs.cmd`，写法见 `skills/aibrowser/SKILL.md` 第 0 节「第 4 步」。
 
 ### 3.1 改完前端代码自检
 

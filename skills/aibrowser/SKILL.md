@@ -85,13 +85,30 @@ bash "$SKILL/scripts/pvs.sh" status --json        # 确认 "running":true 后开
 `serve` 默认**拉起即返回**（不等就绪，避免调用方的 shell 被挂住）；要「等就绪再返回」加 `--wait`。
 两三条命令之间隔一两秒即可，或者用 `pvs status --json` 轮询。
 
-Windows 上三种 shell 的等价写法（都指向同一份自带应用）：
+**Windows（PowerShell）实测最稳的启动方式**：直接拉起应用本体，不经过 CLI：
+
+```powershell
+$B = "$env:USERPROFILE\.codefree-o\.config\skills\aibrowser\bundle\win32-x64"   # 换成你的实际路径
+Start-Process -FilePath "$B\AIBrowser.exe" -ArgumentList "--gui" -WindowStyle Hidden
+
+# 轮询到就绪（一般 0.5–3s）
+for ($i = 0; $i -lt 20; $i++) {
+  Start-Sleep -Milliseconds 500
+  $r = & "$B\pvs.cmd" status --json
+  if ($r -match '"running":true') { Write-Host '服务已就绪'; break }
+}
+```
+
+- 应用本体就是服务：`--gui` 表示要面板窗口，换 `--headless`（或设 `AIBROWSER_HEADLESS=1`）就是无头。
+  `--serve` 是多余的，写不写都一样。
+- 这条路**不依赖 CLI**，因此任何版本的 skill 包都能用（老包也实测通过）。
+- 其它 shell 的等价写法（都指向同一份自带应用）：
 
 | 环境 | 启动 | 确认就绪 |
 | --- | --- | --- |
 | Git Bash / WSL | `bash "$SKILL/scripts/pvs.sh" serve --gui --json` | `bash "$SKILL/scripts/pvs.sh" status --json` |
 | cmd.exe | `"…\bundle\win32-x64\pvs.cmd" serve --gui --json` | `"…\pvs.cmd" status --json` |
-| PowerShell | `& "…\bundle\win32-x64\pvs.cmd" serve --gui --json` | `& "…\pvs.cmd" status --json` |
+| PowerShell（走 CLI） | `& "…\bundle\win32-x64\pvs.cmd" serve --gui --json` | `& "…\pvs.cmd" status --json` |
 
 > 提示：把 `bundle\win32-x64` 加进 `PATH` 后，上面三种都简化成 `pvs serve --gui --json` /
 > `pvs status --json`。
