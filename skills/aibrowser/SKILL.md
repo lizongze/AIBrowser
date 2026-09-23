@@ -80,26 +80,9 @@ bash ~/.agents/skills/aibrowser/scripts/pvs.sh status  # 验证
 | Windows + Git Bash | `MINGW64_NT-…` | `win32-x64` |
 | Windows + PowerShell | 用 `$env:PROCESSOR_ARCHITECTURE` 判断 | `win32-x64` |
 
-**Windows 上的调用方式（按 shell 选，别混）**：
-
-| 环境 | 调用 | 说明 |
-| --- | --- | --- |
-| Git Bash / WSL | `bash scripts/pvs.sh status` | **推荐**：脚本自己按 `uname` 选平台，输出默认 JSON |
-| cmd.exe | `bundle\win32-x64\pvs.cmd status` | 直接写路径即可（无空格时不用引号） |
-| PowerShell | `& .\bundle\win32-x64\pvs.ps1 status` | 包里有原生 `.ps1`；用 `.cmd` 也行，但要 `&` |
-| 任意 shell | 把 `bundle\win32-x64` 加进 `PATH`，然后 `pvs status` | 最省事：无路径、无引号，不会被任何包装器改写 |
-
-> ⚠️ **别随手加 `&`：它在三种 shell 里是三个意思，其中两个都会让你拿不到结果。**
->
-> | shell | `& "path" args`（**前缀**，就是你遇到的写法） | `path args &`（**后缀**） |
-> | --- | --- | --- |
-> | bash / sh | **语法错误**：`syntax error near unexpected token '&'` → 什么都不执行，自然没有回传 | **后台执行**：命令跑了，但这一行不等它，**收不到 stdout、也拿不到退出码**（要 `wait` + 重定向到文件） |
-> | cmd.exe | **语法错误**：`此时不应有 &`（`& was unexpected at this time`）→ 什么都不执行 | 命令分隔符：等价于两条命令，输出会散掉 |
-> | PowerShell | ✅ 正确调用（PowerShell 里以带引号的路径开头**必须**加 `&`），输出正常 | — |
->
-> 结论：**判断不了 shell 就别加 `&`**。最稳的是把 `bundle\win32-x64` 加进 `PATH`，之后统一写 `pvs status`
-> （无路径、无引号，任何 shell 都不会被改写）。确实要后台跑（POSIX）就显式重定向：
-> `nohup pvs serve --gui > /tmp/pvs.log 2>&1 &`，然后读 `/tmp/pvs.log` 或 `pvs status` 取结果。
+**Windows 注意**：skill 的脚本是 bash → 用 **Git Bash** 跑（`uname` 会给出 `MINGW64_NT`，脚本会自动选
+`bundle/win32-x64` 并调用里面的 `pvs.cmd`）；powershell / cmd 里也可以直接调
+`bundle\win32-x64\pvs.cmd status`（自带应用，同样不需要 node/npm）。
 
 ## 前置条件（一次即可）
 

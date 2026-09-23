@@ -329,22 +329,6 @@ npm run verify    # GUI 端到端 72 项：代码渲染 / 网页渲染 / 文件�
 
 ---
 
-### Windows：调用自带应用的三种写法（别混 shell）
-
-| 环境 | 调用 |
-| --- | --- |
-| Git Bash / WSL | `bash ~/.agents/skills/aibrowser/scripts/pvs.sh status` |
-| cmd.exe | `%USERPROFILE%\.agents\skills\aibrowser\bundle\win32-x64\pvs.cmd status` |
-| PowerShell | `& "$env:USERPROFILE\.agents\skills\aibrowser\bundle\win32-x64\pvs.ps1" status` |
-
-`&` 在三种 shell 里意思不同，只有 PowerShell 该用它：
-**前缀写法** `& "path" args` 在 bash/sh 里是**语法错误**（`syntax error near unexpected token '&'`）、
-在 cmd.exe 里也是**语法错误**（`此时不应有 &` / `& was unexpected at this time`），两种情况都什么都不执行、拿不到回传；
-在 PowerShell 里它才是**调用运算符**（以带引号路径开头时必需，输出正常）。
-**后缀写法** `path args &` 在 bash 里是**后台执行**（命令会跑，但你这行收不到 stdout 与退出码）。
-判断不了就别写 `&`：把 `bundle\win32-x64` 加进 `PATH` 后统一用 `pvs status`；
-POSIX 下真要后台跑就显式 `nohup pvs serve --gui > /tmp/pvs.log 2>&1 &` 再读日志。
-
 ### skill 自带应用（别人只拿 skill 就能用）
 
 `npm run skill -- --platforms <平台>` 会打出「skill + 自带应用」的 tar.gz；

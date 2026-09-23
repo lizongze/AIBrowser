@@ -344,26 +344,6 @@ async function writeCliShim(appDir, platform) {
   // Windows 用 CRLF + ASCII；POSIX 用 LF
   await fsp.writeFile(target, lines.join(platform === 'win32' ? '\r\n' : '\n'), 'utf8');
   if (platform !== 'win32') await fsp.chmod(target, 0o755);
-
-  // Windows 再放一份 PowerShell 入口：PowerShell 里调 .cmd 需要 `&` 调用运算符，
-  // 而某些 agent 的包装器会把 `&` 带进 cmd.exe（cmd 里 `&` 是命令分隔符 → 报「此时不应有 &」，
-  // 结果什么都拿不到）。给 PowerShell 一个原生 .ps1，就不用纠结这个差异了。
-  if (platform === 'win32') {
-    const psLines = [
-      '# AIBrowser CLI shim (packaged, PowerShell): run bin/pvs.js with the bundled Electron in node mode',
-      '$here = Split-Path -Parent $MyInvocation.MyCommand.Path',
-      "$env:ELECTRON_RUN_AS_NODE = '1'",
-      "$env:AIBROWSER_PACKAGED = '1'",
-      "$exe = Join-Path $here 'AIBrowser.exe'",
-      // 路径一律用正斜杠：JS 字符串里的 \a \b 会被当成转义写成控制字符（踩过：resources<BEL>app.asar…）
-      "$entry = Join-Path $here 'resources/app.asar/bin/pvs.js'",
-      "if (-not (Test-Path $entry)) { $entry = Join-Path $here 'resources/app/bin/pvs.js' }",
-      '& $exe $entry @args',
-      'exit $LASTEXITCODE',
-      '',
-    ];
-    await fsp.writeFile(path.join(appDir, 'pvs.ps1'), psLines.join('\r\n'), 'utf8');
-  }
   return shimName;
 }
 
