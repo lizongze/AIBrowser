@@ -18,6 +18,72 @@ description_cn: "用真实 Chromium 内核打开本地网页或代码文件并�
 - 需要**定位前端报错**（console error、运行时异常、请求失败）
 - 需要**读取/高亮**某个代码文件的内容
 
+## 0. 先装好它（其它 agent 请先读这一节）
+
+你（agent）拿到这个 skill 时，先按下面三步把它变成「能用」的状态。**不要**一上来就 `npm install`。
+
+### 第 1 步：先看是不是已经能用
+
+```bash
+bash <skill>/scripts/pvs.sh status     # 有输出「运行中 · …」就完事了，跳到「核心命令」
+```
+
+### 第 2 步：探测平台，优先用「自带应用的 skill 包」
+
+```bash
+platform_key() {
+  case "$(uname -s)" in
+    Linux*) echo "linux-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" ;;
+    Darwin*) echo "darwin-$(uname -m | sed 's/x86_64/x64/')" ;;
+    MINGW* | MSYS* | CYGWIN*) echo "win32-$(uname -m | sed 's/x86_64/x64/')" ;;
+    *) echo "unknown-$(uname -m)" ;;
+  esac
+}
+KEY="$(platform_key)"; echo "本机平台：$KEY"
+```
+
+然后**按顺序找一份现成的包**（前一条命中就用它，不要往下折腾）：
+
+```bash
+# 1) 项目里的分发包（版本号最大的那个）
+ls <项目>/dist-skill/aibrowser-skill-*-"$KEY".tar.gz 2>/dev/null | sort -V | tail -1
+# 2) 问用户/或去共享目录拿：aibrowser-skill-<版本>-<平台>-<架构>.tar.gz
+# 3) 项目里的 release/（只有应用、没有 skill 文档）也可以当兜底：release/AIBrowser-*-"$KEY".zip
+```
+
+拿到包之后（**不需要 node / npm / 不需要 clone 仓库**）：
+
+```bash
+tar -xzf aibrowser-skill-<版本>-"$KEY".tar.gz
+cp -r aibrowser ~/.agents/skills/                      # 全局；只给当前项目就放 <项目>/.agents/skills/
+bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh
+bash ~/.agents/skills/aibrowser/scripts/pvs.sh status  # 验证
+```
+
+包里有 `bundle/<平台>-<架构>/`（自带 AIBrowser 与 `pvs`），脚本自动挑当前平台；
+清单在 `bundle/manifest.json`（含各平台可执行文件与 sha256），说明在包内 `BUNDLE.md`。
+
+### 第 3 步：没有现成包时
+
+| 情况 | 做法 |
+| --- | --- |
+| 有本项目仓库 + node | `npm install && npm run build` → `npm run skill -- --platforms <平台>` 打出包（再回第 2 步）；或直接 `bash skills/aibrowser/install.sh`（符号链接安装，开发用） |
+| 有本项目仓库、不想装依赖 | 用 `release/AIBrowser-<版本>-<平台>-<架构>.zip`（自带应用），解压后把该目录加进 `PATH`（包内有 `pvs` / `pvs.cmd`） |
+| 只有本 skill 文档、没有包也没有仓库 | 问用户要包或仓库路径：`export PVS_HOME=/path/to/aibrowser`（有仓库时）—— **不要**自己猜路径，也不要去 clone 别人的仓库 |
+
+### 平台 key 对照
+
+| 环境 | `uname -s` | key 示例 |
+| --- | --- | --- |
+| Linux / WSL | `Linux` | `linux-x64`、`linux-arm64` |
+| macOS | `Darwin` | `darwin-arm64`（Apple Silicon）、`darwin-x64`（Intel） |
+| Windows + Git Bash | `MINGW64_NT-…` | `win32-x64` |
+| Windows + PowerShell | 用 `$env:PROCESSOR_ARCHITECTURE` 判断 | `win32-x64` |
+
+**Windows 注意**：skill 的脚本是 bash → 用 **Git Bash** 跑（`uname` 会给出 `MINGW64_NT`，脚本会自动选
+`bundle/win32-x64` 并调用里面的 `pvs.cmd`）；powershell / cmd 里也可以直接调
+`bundle\win32-x64\pvs.cmd status`（自带应用，同样不需要 node/npm）。
+
 ## 前置条件（一次即可）
 
 ```bash
@@ -30,14 +96,8 @@ bash scripts/ensure-service.sh      # 确保后台服务已就绪（幂等，见
 `$PVS_HOME` → `$AIBROWSER_HOME` → 同仓库内的副本 → `PATH` 里的 `pvs`。
 若都找不到，向用户询问项目路径并设置 `export PVS_HOME=/path/to/aibrowser`。
 
-**这份 skill 可以自带应用（推荐给只想用的人）**：如果目录里有 `bundle/<平台>-<架构>/`
-（例如 `bundle/linux-x64/`），脚本会**优先用它**——不需要项目、node、npm：
-
-```bash
-tar -xzf aibrowser-skill-<版本>-<平台>.tar.gz
-cp -r aibrowser ~/.agents/skills/          # 全局；或 <项目>/.agents/skills/
-bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh
-```
+**这份 skill 可以自带应用**（安装方式见上面的第 0 节）：如果目录里有 `bundle/<平台>-<架构>/`
+（例如 `bundle/linux-x64/`），脚本会**优先用它**——不需要项目、node、npm。
 
 - 自带平台的判定：`uname -s`/`uname -m` → `linux-x64` / `darwin-arm64` / `win32-x64`…
   同一份 skill 里可以带多个平台，脚本会挑当前这个；也可以用 `AIBROWSER_BUNDLE=<目录>` 指定。
@@ -225,10 +285,11 @@ node bin/pvs.js close --all --json
 `browser_content`、`browser_eval`、`browser_screenshot`、`browser_console`、`browser_network`、
 `browser_read_file`、`browser_write_file`、`browser_sessions`、`browser_health`。
 
-## 在别的平台/机器上跑（打包产物）
+## 用打包好的「应用」（不含 skill 文档时）
 
-项目可以一次打出各平台的应用（`npm run package -- --targets all`），产物在 **`<项目目录>/release/`**：
-每个平台一个 zip（自带 Electron 运行时 + 应用），解压即用，**目标机器不需要 node / npm / 依赖**。
+第 0 节讲的是**带 skill 的包**（`dist-skill/aibrowser-skill-*.tar.gz`，含本文件 + 自带应用）。
+如果你手上只有**应用包**（`<项目目录>/release/` 下的 `AIBrowser-<版本>-<平台>-<架构>.zip`），
+也能直接用它 —— 解压即用，目标机器不需要 node / npm / 依赖，只是没有这份 SKILL.md 的配方。
 
 ```bash
 $P packages --target win32 --json      # 让 AI 直接拿到该平台的 zip 路径

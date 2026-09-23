@@ -10,6 +10,12 @@
 
 ## 0. 一句话上手
 
+**先装好它**：本文件所在 skill 若是「自带应用」的包（目录里有 `bundle/<平台>-<架构>/`），
+解压后 `cp -r aibrowser ~/.agents/skills/` 就能用，不需要 node/npm；
+有本项目仓库时优先看 `dist-skill/aibrowser-skill-*-<平台>-<架构>.tar.gz`，
+没有才 `npm install && npm run build && npm run skill -- --platforms <平台>`。
+完整步骤（平台探测、三种情况、Windows/Git Bash）见 `skills/aibrowser/SKILL.md` 的「第 0 节：先装好它」。
+
 ```bash
 node bin/pvs.js open ./path/to/index.html --root ./path/to/project    # 打开
 node bin/pvs.js content --selector "#main"                            # 取渲染后文本

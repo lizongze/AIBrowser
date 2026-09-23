@@ -84,6 +84,10 @@ MCP 里对应 `browser_packages` 工具，CLI 里对应 `pvs packages`。
 
 ### 连 skill 一起打包（别人只要这个 skill 就能用）
 
+> 给别的 agent 的自助安装指南在 `skills/aibrowser/SKILL.md` 的**第 0 节**：
+> 先看 `dist-skill/` 有没有当前平台的包 → 解压 `cp -r aibrowser ~/.agents/skills/` → 跑
+> `scripts/ensure-service.sh`；没有包且没有仓库时问用户要，不要自己猜路径。
+
 ```bash
 npm run skill -- --platforms linux                 # 打出「skill + 自带应用」
 npm run skill -- --platforms linux,win32,darwin    # 一份 skill 带多平台（体积大）
