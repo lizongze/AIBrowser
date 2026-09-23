@@ -90,6 +90,9 @@ bash ~/.agents/skills/aibrowser/scripts/pvs.sh status  # 验证
 npm install && npm run build        # 在 AIBrowser 项目目录内
 npm link                            # 可选：把 pvs 装到 PATH，之后可直接用 pvs
 bash scripts/ensure-service.sh      # 确保后台服务已就绪（幂等，见下）
+
+# 想自己起服务（而不是让脚本管）：带 --json，一次拿到 pid / port / socket / token，不用猜输出
+node <项目>/bin/pvs.js serve --gui --json
 ```
 
 **如何找到 AIBrowser**：本 skill 目录下的 `scripts/pvs.sh` 会自动解析，顺序为
@@ -119,7 +122,14 @@ bash scripts/ensure-service.sh      # 确保后台服务已就绪（幂等，见
 
 ## 核心命令
 
-所有命令都支持 `--json`（**单行 JSON，直接可解析**）。stdout 只有结果，stderr 只有日志。
+**输出格式（AI 优先）**：本 skill 的 `scripts/pvs.sh` **一律默认输出单行 JSON**，直接 `JSON.parse` 即可，
+不需要额外加 `--json`（加了也无妨）。stdout 只有结果，stderr 只有日志 —— **别去解析 stderr**。
+
+- 想看人读的文本：加 `--text`（或 `--human`），或设 `AIBROWSER_FORMAT=text`。
+- 直接调项目里的 `node bin/pvs.js` 时：默认按「有没有终端」判断 —— 被管道/重定向捕获（AI、脚本）用 JSON，
+  终端里用人读文本；显式 `--json` / `--text` 永远优先。
+- `serve` 这类启动命令也建议带 `--json`：返回里有 `pid` / `port` / `socket` / `token` / `endpoint`，
+  agent 能一次拿到连接信息，不用再猜输出、反复轮询。
 
 ```bash
 P=scripts/pvs.sh          # 本 skill 的包装脚本，等价于 pvs

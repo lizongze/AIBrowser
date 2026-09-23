@@ -22,6 +22,7 @@ TOKEN=$(python3 -c "import json,sys;print(json.load(open('$STATE'))['token'])")
 - 鉴权：请求头 `X-PVS-Token: $TOKEN`
 - 免鉴权：`GET /health`、`GET /sessions`
 - 返回：`{"ok":true,"result":{…}}` 或 `{"ok":false,"error":"…","code":"…"}`
+- CLI 侧输出格式默认「AI 优先」：非终端（被捕获）→ 单行 JSON，终端 → 人读文本；`--json` / `--text` 可强制
 - 截图：`GET /screenshot?token=$TOKEN&format=png&fullPage=true` 直接返回图片字节
 
 ```bash

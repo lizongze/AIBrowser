@@ -27,11 +27,23 @@ case "$command" in
   *) keep=1 ;;
 esac
 
-if [ "$keep" = "1" ]; then
-  final=("${args[@]}")
-else
-  final=("${args[@]}" --fresh)
-fi
+# 输出格式：这个包装脚本是给 AI 用的 → 一律默认 JSON（哪怕 agent 在一个伪终端里跑，
+# 源码里的「非终端才用 JSON」规则判断不出来）。人要看文本显式加 --text / --human，
+# 或设 AIBROWSER_FORMAT=text。
+want_text=0
+for arg in "${args[@]}"; do
+  case "$arg" in
+    --text | --human | --no-json) want_text=1 ;;
+    --json | -j) want_text=2 ;;
+  esac
+done
+case "${AIBROWSER_FORMAT:-}" in
+  text | human) [ "$want_text" = "0" ] && want_text=1 ;;
+esac
+
+final=("${args[@]}")
+[ "$keep" = "1" ] || final+=(--fresh)
+[ "$want_text" = "1" ] || final+=(--json)
 
 # 1) 项目目录（开发者：$PVS_HOME / 安装记录 / 同仓库 / PATH 里的 pvs）
 if home="$(resolve_aibrowser_home)"; then

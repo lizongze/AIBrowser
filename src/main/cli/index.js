@@ -556,8 +556,26 @@ const COMMANDS = {
   stop: commandStop,
 };
 
+/**
+ * 输出格式：AI 优先。
+ *   --json / -j            → JSON
+ *   --text / --human       → 人读
+ *   AIBROWSER_FORMAT=json|text → 同上
+ *   都没给：stdout 是终端（人）就用文本，被管道/重定向捕获（AI、脚本）就用 JSON。
+ * 这样 agent 直接 `pvs serve --gui` 也能拿到可解析的单行 JSON，不会因为「输出看不懂」而卡住。
+ */
+function resolveJsonMode(flags) {
+  if (flags.json === true) return true;
+  if (flags.text || flags.human || flags['no-json']) return false;
+  const env = String(process.env.AIBROWSER_FORMAT || '').trim().toLowerCase();
+  if (env === 'json') return true;
+  if (env === 'text' || env === 'human') return false;
+  return !process.stdout.isTTY;
+}
+
 async function main(argv) {
   const { _: positional, flags } = parseArgs(argv);
+  flags.json = resolveJsonMode(flags);
   if (flags.version) {
     out(require('../../../package.json').version);
     return EXIT_OK;
@@ -569,8 +587,12 @@ async function main(argv) {
   }
   const handler = COMMANDS[command];
   if (!handler) {
-    errOut(`未知命令：${command}\n`);
-    errOut(HELP);
+    // 未知命令也要按「AI 优先」的格式回：JSON 模式给可解析的结构，别把 HELP 混进 stdout
+    if (flags.json) jsonOut({ ok: false, error: `未知命令：${command}`, code: 'EUSAGE', commands: Object.keys(COMMANDS) });
+    else {
+      errOut(`未知命令：${command}\n`);
+      errOut(HELP);
+    }
     return EXIT_USAGE;
   }
   try {

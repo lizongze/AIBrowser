@@ -211,7 +211,7 @@ npm link && pvs <命令>           # 或者安装到 PATH，之后可以直接 p
 | `pvs console [id] [--clear]` | 读取控制台日志 |
 | `pvs network [id] [--on\|--off] [--clear]` | 网络请求记录 |
 | `pvs reload [id] [--hard]` / `pvs close [id\|--all]` | 刷新 / 关闭会话 |
-| `pvs serve [--gui]` / `pvs stop` / `pvs status` | 常驻服务（`--gui` 开面板窗口，否则纯无头）；`--native-ua` 保留 Electron 原始 UA |
+| `pvs serve [--gui]` / `pvs stop` / `pvs status` | 常驻服务（`--gui` 开面板窗口，否则纯无头）；`--native-ua` 保留 Electron 原始 UA；建议带 `--json` |
 | `pvs packages [--target win32\|linux\|darwin] [--json]` | 列出已打包的各平台应用（按平台挑 zip / 可执行文件 / sha256） |
 
 通用参数：`--json`（单行 JSON 输出，便于脚本与 AI 解析）、`--root <dir>`、`--daemon`、`--gui`、`--no-spawn`、`--quiet`。
@@ -228,6 +228,9 @@ pvs stop
 ```
 
 ## HTTP API（无头渲染服务）
+
+**输出格式是 AI 优先的**：被管道/重定向捕获时（AI、脚本）默认**单行 JSON**，终端里默认给人读的文本；
+`--json` / `--text` / `AIBROWSER_FORMAT=json|text` 可覆盖。skill 的 `scripts/pvs.sh` 则一律注入 `--json`。
 
 `pvs serve` 或任何运行中的实例都会在 `state.json` 暴露端口与令牌：
 

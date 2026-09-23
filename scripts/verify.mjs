@@ -573,6 +573,27 @@ async function main() {
     );
   }
 
+  // 输出格式（AI 优先）：被捕获时默认 JSON，显式 --text / AIBROWSER_FORMAT=text 才是人读文本；
+  // skill 的包装脚本即使跑在伪终端里也会注入 --json
+  const cliJson = spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'status'], { encoding: 'utf8', timeout: 30000 });
+  let cliParsed = null;
+  try {
+    cliParsed = JSON.parse(String(cliJson.stdout).trim().split('\n').pop());
+  } catch {
+    cliParsed = null;
+  }
+  check(Boolean(cliParsed && typeof cliParsed.ok === 'boolean'), 'CLI 被捕获时默认输出单行 JSON（AI 优先）',
+    String(cliJson.stdout).trim().slice(0, 60));
+  const cliText = spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'status', '--text'], { encoding: 'utf8', timeout: 30000 });
+  check(!String(cliText.stdout).trim().startsWith('{'), '--text 可以要回人读文本', String(cliText.stdout).trim().split('\n')[0]);
+  const ptyProbe = spawnSync('script', ['-qec', `bash ${path.join(root, 'skills', 'aibrowser', 'scripts', 'pvs.sh')} status`, '/dev/null'], { encoding: 'utf8', timeout: 40000 });
+  const ptyLine = String(ptyProbe.stdout || '').trim().split('\n').filter(Boolean).pop() || '';
+  check(
+    ptyProbe.status === 0 || ptyLine.startsWith('{'),
+    'skill 包装脚本在伪终端里也输出 JSON',
+    ptyLine.slice(0, 60) || `script 不可用（status=${ptyProbe.status}）`,
+  );
+
   // 空标签：可以连续新建多个，并且排在所有会话标签之后
   await api('panelAction', { action: 'new-tab' });
   await sleep(300);

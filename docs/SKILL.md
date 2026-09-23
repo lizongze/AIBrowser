@@ -33,7 +33,8 @@ node bin/pvs.js stop                                                  # 收工
 
 | 项 | 约定 |
 | --- | --- |
-| stdout | **只有结果**。加 `--json` 就是**单行 JSON**，可直接 `JSON.parse` |
+| stdout | **只有结果**。默认就按场景选好了格式：非终端（被管道/重定向捕获，AI 常用）→ **单行 JSON**；终端里 → 人读文本。`--json` / `--text`（`--human`）或 `AIBROWSER_FORMAT=json\|text` 可强制 |
+| skill 包装脚本 | `skills/aibrowser/scripts/pvs.sh` 一律注入 `--json`（哪怕 agent 跑在伪终端里），要人读加 `--text` |
 | stderr | 日志、进度、错误提示（`[pvs] …`）。不要把 stderr 当结果解析 |
 | 退出码 | `0` 成功 / `1` 失败 / `2` 用法错误 |
 | 成功 JSON | `{"ok":true,...}`（`open` 带 `sessionId` / `url` / `kind` / `title`） |
