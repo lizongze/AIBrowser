@@ -10,6 +10,17 @@
 
 ## 0. 一句话上手
 
+> 下面所有示例用 `$P` 代表**自带应用**的入口，不需要 node / npm：
+>
+> ```bash
+> P="<skill>/scripts/pvs.sh"     # 自带应用（等价于 bundle/<平台>-<架构>/pvs）；开发环境可换成 node bin/pvs.js
+> ```
+
+
+**启动服务用 `--detach`**：`pvs serve --gui --detach --json` 拉起后立刻返回，再用 `pvs status --json`
+轮询到 `running:true`；阻塞式 `serve` 会在 agent 的 shell 包装器（无控制台 + 管道）里挂住。
+skill 的 `scripts/ensure-service.sh` 已经是这个流程。
+
 **先装好它**：本文件所在 skill 若是「自带应用」的包（目录里有 `bundle/<平台>-<架构>/`），
 解压后 `cp -r aibrowser ~/.agents/skills/` 就能用，不需要 node/npm；
 有本项目仓库时优先看 `dist-skill/aibrowser-skill-*-<平台>-<架构>.tar.gz`，
@@ -17,12 +28,12 @@
 完整步骤（平台探测、三种情况、Windows/Git Bash）见 `skills/aibrowser/SKILL.md` 的「第 0 节：先装好它」。
 
 ```bash
-node bin/pvs.js open ./path/to/index.html --root ./path/to/project    # 打开
-node bin/pvs.js content --selector "#main"                            # 取渲染后文本
-node bin/pvs.js eval "document.title"                                 # 执行 JS
-node bin/pvs.js shot --out /tmp/page.png --full-page                  # 截图
-node bin/pvs.js console                                               # 读报错
-node bin/pvs.js stop                                                  # 收工
+$P open ./path/to/index.html --root ./path/to/project    # 打开
+$P content --selector "#main"                            # 取渲染后文本
+$P eval "document.title"                                 # 执行 JS
+$P shot --out /tmp/page.png --full-page                  # 截图
+$P console                                               # 读报错
+$P stop                                                  # 收工
 ```
 
 **没有实例也能用**：第一条命令会自动拉起一个无头守护进程，之后所有命令复用它（第二次起几乎零延迟）。
@@ -73,32 +84,47 @@ node bin/pvs.js stop                                                  # 收工
 
 ## 3. 典型任务配方
 
+### 3.0 起服务并确认就绪（所有配方的第一步）
+
+```bash
+$P status --json                             # 已在跑（"running":true）就直接用
+$P serve --gui --detach --json               # 没跑就启动：立刻返回 {"ok":true,"spawning":true,...}
+until $P status --json | grep -q '"running":true'; do sleep 0.5; done   # 轮询到就绪（通常 2-3s）
+```
+
+- **一定带 `--detach`**：不带它会等服务就绪才返回；agent 的 shell 包装器（无控制台 + 管道的
+  PowerShell）在等待期间会把整条命令挂住，最后超时被 kill，看起来像启动失败（其实服务已起来）。
+- `ensure-service.sh` 内部就是这个流程（还会按需从无头切成面板、检测仓库代码是否比服务新），
+  agent 直接调它最省事：`bash <skill>/scripts/ensure-service.sh`。
+- Windows 上 cmd / PowerShell 用 `bundle\win32-x64\pvs.cmd`，写法见 `skills/aibrowser/SKILL.md` 第 0 节
+  「第 4 步」。
+
 ### 3.1 改完前端代码自检
 
 ```bash
-node bin/pvs.js open ./index.html --root .
-node bin/pvs.js console --json            # 先排除报错
-node bin/pvs.js shot --out /tmp/shot.png  # 再截图确认
+$P open ./index.html --root .
+$P console --json            # 先排除报错
+$P shot --out /tmp/shot.png  # 再截图确认
 ```
 
 ### 3.2 抓渲染后的数据（DOM 结果，不是原始 HTML）
 
 ```bash
-node bin/pvs.js content --selector ".price" --json
-node bin/pvs.js eval "[...document.querySelectorAll('.item')].map(e => e.innerText.trim())"
-node bin/pvs.js content --selector "table" --html
+$P content --selector ".price" --json
+$P eval "[...document.querySelectorAll('.item')].map(e => e.innerText.trim())"
+$P content --selector "table" --html
 ```
 
 ### 3.3 定位前端报错
 
 ```bash
-node bin/pvs.js console --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const e=JSON.parse(s).result.entries.filter(x=>x.level==='error');console.log(e.length?e:'没有错误')})"
+$P console --json | grep -o '"level":"error"' | wc -l    # 错误条数（不需要 node/jq；也可以交给 agent 直接解析 JSON）
 ```
 
 ### 3.4 查元素真实样式与位置
 
 ```bash
-node bin/pvs.js eval "(() => { const el = document.querySelector('#btn'); const s = getComputedStyle(el); return { text: el.innerText, color: s.color, display: s.display, rect: el.getBoundingClientRect().toJSON() }; })()"
+$P eval "(() => { const el = document.querySelector('#btn'); const s = getComputedStyle(el); return { text: el.innerText, color: s.color, display: s.display, rect: el.getBoundingClientRect().toJSON() }; })()"
 ```
 
 ### 3.5 等异步渲染完成（避免拿到空内容）
@@ -108,7 +134,7 @@ node bin/pvs.js eval "(() => { const el = document.querySelector('#btn'); const 
 ```bash
 # 等 #list 至少出现 10 个子项，最多等 6 秒
 for i in $(seq 1 20); do
-  n=$(node bin/pvs.js eval "document.querySelectorAll('#list > *').length")
+  n=$($P eval "document.querySelectorAll('#list > *').length")
   [ "$n" -ge 10 ] && break
   sleep 0.3
 done
@@ -121,21 +147,21 @@ done
 
 ```bash
 # ...编辑 index.html...
-sleep 1 && node bin/pvs.js eval "document.querySelector('h1').innerText"
+sleep 1 && $P eval "document.querySelector('h1').innerText"
 ```
 
 ### 3.7 检查接口请求
 
 ```bash
-node bin/pvs.js network --on
-node bin/pvs.js reload
-node bin/pvs.js network --json     # entries: [{method,url,status,resourceType,ok,durationMs}]
+$P network --on
+$P reload
+$P network --json     # entries: [{method,url,status,resourceType,ok,durationMs}]
 ```
 
 ### 3.8 预览代码文件（高亮，不做网页渲染）
 
 ```bash
-node bin/pvs.js code ./src/app.ts --line 42 --json
+$P code ./src/app.ts --line 42 --json
 # → {"ok":true,"sessionId":"s3","kind":"code","file":"...","language":"typescript"}
 ```
 
@@ -150,12 +176,16 @@ node bin/pvs.js code ./src/app.ts --line 42 --json
 向用户确认截图输出目录（如用户消息里已指明则直接用）。可在目录下加时间戳子目录，
 也可直接用用户给的路径。**不要写死 `gen/<时间戳>/`**。
 
-**Step 1 — 确保面板服务运行（GUI 模式）**
+**Step 1 — 确保面板服务运行（GUI 模式，用 `--detach`）**
 
 ```bash
-node bin/pvs.js status --json     # 已运行且 mode=gui 则跳过
-node bin/pvs.js serve --gui       # 未运行时启动面板窗口
+$P status --json                 # 已运行且 "mode":"gui" 就跳过
+$P serve --gui --detach --json   # 启动：立刻返回，不阻塞调用方
+until $P status --json | grep -q '"running":true'; do sleep 0.5; done   # 轮询就绪
 ```
+
+> 必须带 `--detach`：阻塞式 `serve` 要等服务就绪才返回，agent 的 shell 包装器（无控制台 + 管道的
+> PowerShell）在等待期间会把命令挂住、最后被超时 kill —— 看起来像没启动成功，其实服务已经起来了。
 
 代码文件只有 GUI 面板服务才能截到「整块面板」（标签条 + 行号栏），无头服务只能截到纯代码页。
 
@@ -164,7 +194,7 @@ node bin/pvs.js serve --gui       # 未运行时启动面板窗口
 **每次开始批量截图前，先关掉所有已有会话**，避免残留标签干扰：
 
 ```bash
-node bin/pvs.js close --all --json
+$P close --all --json
 ```
 
 **Step 3 — 逐个截图（`.png.zip` 中转绕水印）**
@@ -174,7 +204,7 @@ node bin/pvs.js close --all --json
 1. **打开**（`--fresh` 自动关掉上一个面板，面板里始终只有当前文件）：
 
    ```bash
-   node bin/pvs.js open <file> --json
+   $P open <file> --json
    # 从返回 JSON 取 sessionId
    ```
 
@@ -183,7 +213,7 @@ node bin/pvs.js close --all --json
 3. **截图**，落盘用 `.png.zip` 后缀（平台水印 hook 只认真实扩展名，`.zip` 不触发注入）：
 
    ```bash
-   node bin/pvs.js shot <sessionId> --out "<输出目录>/001-<文件名>.png.zip" --json
+   $P shot <sessionId> --out "<输出目录>/001-<文件名>.png.zip" --json
    ```
 
    - 报「取不到渲染帧」时，等 3 秒重试一次 `shot`。
@@ -234,7 +264,7 @@ pvs packages --target win32 --json    # 拿该平台的 zip / 解压后的可执
 ## 4. HTTP API（适合长驻、多次调用）
 
 ```bash
-node bin/pvs.js serve                 # 幂等；已在运行会直接返回信息
+$P serve                 # 幂等；已在运行会直接返回信息
 STATE="${XDG_RUNTIME_DIR:-$HOME/.aibrowser}/aibrowser/state.json"
 PORT=$(node -e "console.log(require('$STATE').port)")
 TOKEN=$(node -e "console.log(require('$STATE').token)")
@@ -297,7 +327,7 @@ curl -s -X POST "http://127.0.0.1:$PORT/panelAction" -H "X-PVS-Token: $TOKEN" \
 
 ---
 
-## 5. 自检与验收（改完代码后跑）
+## 5. 自检与验收（改完代码后跑；用自带应用的人不需要这一步）
 
 ```bash
 npm run smoke     # 无头全链路 18 项：加载 → 取文本 → eval → 控制台 → 截图 → 像素校验 → 身份/EPIPE 兜底

@@ -71,6 +71,36 @@ bash ~/.agents/skills/aibrowser/scripts/pvs.sh status  # 验证
 | 有本项目仓库、不想装依赖 | 用 `release/AIBrowser-<版本>-<平台>-<架构>.zip`（自带应用），解压后把该目录加进 `PATH`（包内有 `pvs` / `pvs.cmd`） |
 | 只有本 skill 文档、没有包也没有仓库 | 问用户要包或仓库路径：`export PVS_HOME=/path/to/aibrowser`（有仓库时）—— **不要**自己猜路径，也不要去 clone 别人的仓库 |
 
+### 第 4 步：启动服务并确认就绪（**用 `--detach`，别用阻塞式 `serve`**）
+
+```bash
+SKILL=~/.agents/skills/aibrowser            # 或 <项目>/.agents/skills/aibrowser
+
+# 首选：一句搞定（内部就是「拉起后立刻返回 + 轮询就绪」）
+bash "$SKILL/scripts/ensure-service.sh"
+
+# 自己来也行：先拉起（立刻返回），再轮询 status 到 running:true
+bash "$SKILL/scripts/pvs.sh" serve --gui --detach --json
+bash "$SKILL/scripts/pvs.sh" status --json          # 看到 "running":true 就可以干活了
+```
+
+为什么不用 `serve`（不带 `--detach`）：它会**等服务就绪才返回**，而 agent 的 shell 包装器
+（尤其是无控制台 + 管道的 PowerShell）在等待期间会把整条命令挂住，表现为「一直 pending、拿不到回传」，
+最后被超时 kill —— 让人以为工具没启动成功（其实服务已经起来了）。
+
+Windows 上三种 shell 的等价写法（都指向同一份自带应用）：
+
+| 环境 | 启动 | 确认就绪 |
+| --- | --- | --- |
+| Git Bash / WSL | `bash "$SKILL/scripts/pvs.sh" serve --gui --detach --json` | `bash "$SKILL/scripts/pvs.sh" status --json` |
+| cmd.exe | `"…\bundle\win32-x64\pvs.cmd" serve --gui --detach --json` | `"…\pvs.cmd" status --json` |
+| PowerShell | `& "…\bundle\win32-x64\pvs.cmd" serve --gui --detach --json` | `& "…\pvs.cmd" status --json` |
+
+> 提示：把 `bundle\win32-x64` 加进 `PATH` 后，上面三种都简化成 `pvs serve --gui --detach --json` /
+> `pvs status --json`（无路径、无引号，任何 shell 都不会去改写它）。
+
+服务起来后就可以用核心命令了（输出默认是单行 JSON）：`open` / `shot` / `batch` / `content` / `eval` …
+
 ### 平台 key 对照
 
 | 环境 | `uname -s` | key 示例 |
@@ -83,6 +113,7 @@ bash ~/.agents/skills/aibrowser/scripts/pvs.sh status  # 验证
 **Windows 注意**：skill 的脚本是 bash → 用 **Git Bash** 跑（`uname` 会给出 `MINGW64_NT`，脚本会自动选
 `bundle/win32-x64` 并调用里面的 `pvs.cmd`）；powershell / cmd 里也可以直接调
 `bundle\win32-x64\pvs.cmd status`（自带应用，同样不需要 node/npm）。
+启动服务时记得带 `--detach`（见第 4 步）。
 
 ## 前置条件（一次即可）
 
@@ -231,21 +262,31 @@ $P batch --dir ./site --ext html                   # 收集目录下的 HTML
 向用户确认截图输出目录（如用户消息里已指明则直接用）。可在目录下加时间戳子目录，
 也可直接用用户给的路径。**不要写死 `gen/<时间戳>/`**。
 
-### Step 1 — 确保面板服务运行（GUI 模式）
+### Step 1 — 确保面板服务运行（GUI 模式，用 `--detach`）
 
 ```bash
-node bin/pvs.js status --json     # 已运行且 mode=gui 则跳过
-node bin/pvs.js serve --gui       # 未运行时启动面板窗口
+P="$SKILL/scripts/pvs.sh"                 # 自带应用入口；开发环境可换成 node bin/pvs.js
+
+$P status --json                          # 已运行且 "mode":"gui" 就跳过这一步
+$P serve --gui --detach --json            # 未运行时启动：立刻返回，不阻塞调用方
+for i in $(seq 1 30); do                  # 再轮询到 running:true（最多 ~15s）
+  $P status --json | grep -q '"running":true' && break
+  sleep 0.5
+done
 ```
 
-代码文件只有 GUI 面板服务才能截到「整块面板」（标签条 + 行号栏），无头服务只能截到纯代码页。
+- **必须带 `--detach`**：阻塞式 `serve` 会等服务就绪才返回，agent 的 shell 包装器
+  （无控制台 + 管道的 PowerShell）在等待期间会把整条命令挂住，最后超时被 kill ——
+  看起来像「没启动成功」，其实服务已经起来了。`ensure-service.sh` 内部就是这个流程，也可以直接调它。
+- Windows 三种 shell 的等价写法见本文件第 0 节「第 4 步」。
+- 代码文件只有 **GUI 面板服务**才能截到「整块面板」（标签条 + 行号栏）；无头服务只能截到纯代码页。
 
 ### Step 2 — 清空所有已有 tab（重要！）
 
 **每次开始批量截图前，先关掉所有已有会话**，避免残留标签干扰：
 
 ```bash
-node bin/pvs.js close --all --json
+$P close --all --json
 ```
 
 ### Step 3 — 逐个截图（`.png.zip` 中转绕水印）
@@ -255,7 +296,7 @@ node bin/pvs.js close --all --json
 1. **打开**（`--fresh` 自动关掉上一个面板，面板里始终只有当前文件）：
 
    ```bash
-   node bin/pvs.js open <file> --json
+   $P open <file> --json
    # 从返回 JSON 取 sessionId
    ```
 
@@ -264,7 +305,7 @@ node bin/pvs.js close --all --json
 3. **截图**，落盘用 `.png.zip` 后缀（平台水印 hook 只认真实扩展名，`.zip` 不触发注入）：
 
    ```bash
-   node bin/pvs.js shot <sessionId> --out "<输出目录>/001-<文件名>.png.zip" --json
+   $P shot <sessionId> --out "<输出目录>/001-<文件名>.png.zip" --json
    ```
 
    - 报「取不到渲染帧」时，等 3 秒重试一次 `shot`。
