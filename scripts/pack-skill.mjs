@@ -36,11 +36,59 @@ function parseArgs(argv) {
     else if (argv[i] === '--unpacked') out.unpacked = true;
     else if (argv[i] === '--out-dir') out.outDir = String(argv[++i] || '');
     else if (argv[i] === '--reuse') out.reuse = true;
+    else if (argv[i] === '--combined') out.combined = true;
     else if (argv[i] === '--arch') out.arch = String(argv[++i] || 'x64');
     else if (argv[i] === '--from-cache') out.fromCache = true;
   }
   out.platforms = [...new Set(out.platforms.map((p) => (p === 'windows' ? 'win32' : p === 'mac' || p === 'macos' ? 'darwin' : p)))];
   return out;
+}
+
+/** 递归硬链接（同一文件系统内瞬间完成）：per-platform 打包时用来复用共享的应用目录 */
+async function hardLinkTree(src, dest) {
+  await fsp.mkdir(dest, { recursive: true });
+  for (const entry of await fsp.readdir(src, { withFileTypes: true })) {
+    const from = path.join(src, entry.name);
+    const to = path.join(dest, entry.name);
+    if (entry.isSymbolicLink()) await fsp.symlink(await fsp.readlink(from), to);
+    else if (entry.isDirectory()) await hardLinkTree(from, to);
+    else await fsp.link(from, to);
+  }
+}
+
+/** 某个平台单独一份的 skill 目录（skeleton 复制 + 该平台 bundle 硬链接） */
+async function buildPerPlatformDir(buildRoot, key, info, sharedSkillDir) {
+  const pkgRoot = path.join(buildRoot, `pkg-${key}`);
+  forceRemove(pkgRoot);
+  const dest = path.join(pkgRoot, 'aibrowser');
+  // 骨架（文档/脚本/参考）：复制
+  for (const name of await fsp.readdir(sharedSkillDir)) {
+    if (name === 'bundle') continue;
+    await fsp.cp(path.join(sharedSkillDir, name), path.join(dest, name), { recursive: true, verbatimSymlinks: true });
+  }
+  // 自带应用：硬链接（同一分区，秒级）
+  await hardLinkTree(path.join(sharedSkillDir, 'bundle', key), path.join(dest, 'bundle', key));
+  // 该包自己的清单（只列本平台）
+  const single = {
+    name: 'aibrowser-skill',
+    productName: 'AIBrowser',
+    version: info.version,
+    electron: info.electron,
+    generatedAt: new Date().toISOString(),
+    platforms: { [key]: info },
+  };
+  await fsp.writeFile(path.join(dest, 'bundle', 'manifest.json'), `${JSON.stringify(single, null, 2)}\n`, 'utf8');
+  // BUNDLE.md 只写本平台
+  const bundleMdPath = path.join(dest, 'BUNDLE.md');
+  let bundleMd = '';
+  try {
+    bundleMd = await fsp.readFile(bundleMdPath, 'utf8');
+  } catch {
+    bundleMd = '# 这份 skill 自带 AIBrowser 应用\n';
+  }
+  const head = bundleMd.split('\n').slice(0, 3).join('\n');
+  await fsp.writeFile(bundleMdPath, `${head}\n\n自带平台：${key}\n${bundleMd.split('\n').slice(3).join('\n')}`, 'utf8');
+  return { pkgRoot, appDir: dest };
 }
 
 function sha256(file) {
@@ -367,10 +415,34 @@ async function main() {
 
   fs.mkdirSync(outRoot, { recursive: true });
   if (args.tar) {
-    for (const [key, info] of Object.entries(platforms)) {
-      const tarPath = path.join(outRoot, `aibrowser-skill-${appVersion}-${key}.tar.gz`);
+    const keys = Object.keys(platforms);
+    if (args.combined && keys.length) {
+      const tarPath = path.join(outRoot, `aibrowser-skill-${appVersion}-all.tar.gz`);
       forceRemove(tarPath);
       execFileSync('tar', ['-czf', tarPath, '-C', buildRoot, 'aibrowser'], { stdio: 'inherit' });
+      process.stdout.write(`[skill] 合并分发包（${keys.join(' + ')}）：${path.relative(root, tarPath)}`
+        + `（${Math.round(fs.statSync(tarPath).size / 1024 / 1024)}MB）\n`);
+      results.push({
+        platform: 'all',
+        arch: 'any',
+        ok: true,
+        archive: tarPath,
+        archiveBytes: fs.statSync(tarPath).size,
+        sha256: sha256(tarPath),
+        builtAt: new Date().toISOString(),
+        version: appVersion,
+        electron: electronVersion,
+        bundlePlatforms: keys,
+        note: '合并包：一份 skill 里带多个平台',
+      });
+    }
+    for (const [key, info] of keys.length && !args.combined ? Object.entries(platforms) : []) {
+      // 每个平台单独一份：只装它自己的 bundle，避免「打某个平台却带着所有平台」的体积翻倍
+      const { pkgRoot } = await buildPerPlatformDir(buildRoot, key, info, skillDir);
+      const tarPath = path.join(outRoot, `aibrowser-skill-${appVersion}-${key}.tar.gz`);
+      forceRemove(tarPath);
+      execFileSync('tar', ['-czf', tarPath, '-C', pkgRoot, 'aibrowser'], { stdio: 'inherit' });
+      forceRemove(pkgRoot);
       process.stdout.write(`[skill] 分发包：${path.relative(root, tarPath)}（${Math.round(fs.statSync(tarPath).size / 1024 / 1024)}MB）\n`);
       process.stdout.write('         别人拿到后：tar -xzf <包> && cp -r aibrowser ~/.agents/skills/\n');
       info.archive = tarPath;
