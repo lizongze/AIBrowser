@@ -268,7 +268,9 @@ $P close --all --json
 ### 3.10 跨平台打包与分发（让 AI 直接选应用文件）
 
 ```bash
-npm run package -- --targets all      # linux + win32 + darwin（Electron 预编译包会自动取）
+npm run package:all                   # 三平台 × x64/arm64（Electron 预编译包会自动取）
+npm run package:linux                 # 只打 linux（win32 / darwin 同理）
+npm run skill:linux                   # 顺手把「skill + 自带应用」也打出来
 pvs packages --target win32 --json    # 拿该平台的 zip / 解压后的可执行文件 / sha256
 ```
 

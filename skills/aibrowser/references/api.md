@@ -74,7 +74,7 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 
 ### 打包产物（`packages`）
 
-各平台应用由 `npm run package -- --targets all` 产出，落在项目根 `release/`：
+各平台应用由 `npm run package:all`（或 `package:linux` / `package:win32` / `package:darwin`，默认 x64+arm64）产出，落在项目根 `release/`：
 
 ```json
 {

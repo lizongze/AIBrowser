@@ -49,17 +49,26 @@ Windows 原生运行下的界面（全屏模式：只留标签条，标题栏与
 ## 打包成各平台应用（给 AI 直接用）
 
 ```bash
-npm run package                          # 当前平台
-npm run package -- --targets all         # linux + win32 + darwin（能下到 Electron 就行）
-npm run package -- --targets linux,win32 # 多平台：值用逗号分隔
-npm run package -- --targets win32       # 交叉打 Windows 包（复用 node_modules.win* 里的现成 dist，离线可用）
+# 推荐：一个平台一条命令，默认 x64 + arm64 两种架构
+npm run package:linux                    # linux-x64 + linux-arm64
+npm run package:win32                    # win32-x64 + win32-arm64
+npm run package:darwin                   # darwin-x64 + darwin-arm64
+npm run package:all                      # 三平台 × 两架构（能下到 Electron 就行）
+
+npm run package                          # 当前平台、当前架构（最快）
+npm run package -- --targets linux,win32 # 临时组合：多平台**用逗号分隔**
+npm run package -- --targets darwin --arch x64,arm64
 npm run package -- --targets linux --skip-existing   # 已有产物就复用（只刷新清单）
 pvs packages --json                      # 列出产物（AI 按平台挑文件）
 pvs packages --target win32 --json       # 只挑 Windows 的
 ```
 
+> **`--arch` 不写就只出当前架构**（本机是 x64 就只出 x64），这是最容易漏 arm64 的地方 ——
+> 所以上面的 `package:<平台>` 脚本已经把 `--arch x64,arm64` 写死了。
+> arm64 产物需要对应的 Electron 包：缓存里没有时会自动下载（`~/.cache/aibrowser-electron/`）。
+
 每个平台一份产物（Electron 运行时是原生的，不能跨平台共用）；多平台**值用逗号分隔**
-（`--targets linux,win32`、`--arch x64,arm64`）；开头会打印「目标：linux-x64 win32-x64」，
+（`--targets linux,win32`、`--arch x64,arm64`）；开头会打印「目标：linux-x64 linux-arm64 …」，
 认不出来的参数会明确警告，不会静默忽略。
 
 产物落在 `release/`（已 gitignore）：
@@ -96,11 +105,21 @@ MCP 里对应 `browser_packages` 工具，CLI 里对应 `pvs packages`。
 > 安装时**不起服务**（面板是 GUI 窗口），第一次真正干活的命令（`open`/`shot`/`code`）会自己拉起。
 
 ```bash
-npm run skill -- --platforms linux                 # 打出「skill + 自带应用」（linux 一份）
+# 与 package:* 对称：一条命令 = 一个平台（x64 + arm64 两架构）
+npm run skill:linux                                # → dist-skill/…-linux-x64.tar.gz + …-linux-arm64.tar.gz
+npm run skill:win32
+npm run skill:darwin
+npm run skill:all                                  # 三平台 × 两架构
+# 想要「一份包带多平台」时加 --combined，例如：
+npm run skill:all -- --combined
+
+npm run skill -- --platforms linux                 # 等价的手写形式（默认只出当前架构）
 npm run skill -- --platforms linux,win32           # 多平台＝多份包（每份只带自己的平台）
-npm run skill -- --platforms all --combined        # 想要「一份包带多平台」时加 --combined
 # → dist-skill/aibrowser-skill-0.1.0-linux-x64.tar.gz（111MB）
 ```
+
+`pack-skill` 会**自动调用 `package.mjs`** 补齐缺失的 release 包（也可以先跑 `npm run package:<平台>`），
+已有产物加 `-- --reuse` 直接复用（只刷新索引）。三平台六个包的体积约 900MB+，按需打。
 
 别人拿到压缩包后：
 
