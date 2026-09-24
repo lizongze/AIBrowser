@@ -4,5 +4,7 @@ dist/
 *.log
 .aibrowser/
 gen/
-release/
-dist-skill/
+
+# 不再忽略，发版用
+# release/
+# dist-skill/
