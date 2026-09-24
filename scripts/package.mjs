@@ -115,6 +115,53 @@ function makeZip(rootDir, zipPath, { contents = false, baseDir = null } = {}) {
 }
 
 /** 从已安装的 electron 包里拿一份本平台 dist，压成 packager 需要的 zip（离线兜底） */
+/**
+ * 读可执行文件自己声明的目标架构（PE / ELF / Mach-O 三种头部）。
+ * 为什么要它：以前这里只核对「平台目录结构对不对」，于是 `--arch arm64` 会把 x64 的 dist
+ * 原样打成 `electron-v…-win32-arm64.zip` —— 文件名正确、内容却是 x64，属于最坑的静默错误
+ * （在 ARM Windows 上靠 x64 模拟能跑，于是很久都发现不了）。
+ */
+function binaryArch(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(64);
+    const read = fs.readSync(fd, head, 0, 64, 0);
+    if (read < 20) return null;
+    // Windows：MZ → e_lfanew 处 PE\0\0 + machine
+    if (head.toString('ascii', 0, 2) === 'MZ') {
+      const peOffset = head.readUInt32LE(0x3c);
+      const pe = Buffer.alloc(6);
+      if (fs.readSync(fd, pe, 0, 6, peOffset) < 6) return null;
+      if (pe.toString('ascii', 0, 4) !== 'PE\0\0') return null;
+      const machine = pe.readUInt16LE(4);
+      return { 0x8664: 'x64', 0xaa64: 'arm64', 0x14c: 'ia32' }[machine] || `pe:0x${machine.toString(16)}`;
+    }
+    // Linux：ELF 头部 e_machine
+    if (head[0] === 0x7f && head.toString('ascii', 1, 4) === 'ELF') {
+      const machine = head.readUInt16LE(18);
+      return { 0x3e: 'x64', 0xb7: 'arm64' }[machine] || `elf:0x${machine.toString(16)}`;
+    }
+    // macOS：Mach-O cputype
+    const magic = head.readUInt32LE(0);
+    if (magic === 0xfeedfacf || magic === 0xfeedface) {
+      const cpu = head.readUInt32LE(4);
+      return { 0x1000007: 'x64', 0x100000c: 'arm64' }[cpu] || `macho:0x${cpu.toString(16)}`;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 function zipFromInstalledDist(platform, arch, zipPath) {
   // Windows 侧的依赖目录（node_modules.win*）里本来就有一份 Windows dist，
   // 在 Linux 上交叉打 Windows 包时直接用它，省一次 100MB 下载（离线也能打）。
@@ -127,13 +174,27 @@ function zipFromInstalledDist(platform, arch, zipPath) {
     candidates.push(...['node_modules.win2', 'node_modules.win3', 'node_modules.win']
       .map((dir) => path.join(root, dir, 'node_modules', 'electron', 'dist')));
   }
-  // 再把期望的目录结构核对一遍，避免「文件名碰巧一样」
+  // 再把期望的目录结构 + **目标架构**都核对一遍：
+  // 平台目录可能有一份，但架构未必是你要的那个（win32 目录里通常是 x64），
+  // 架构对不上就返回 null 去走下载 —— 宁可多下一次 100MB，也不要产出名不副实的包。
   const dist = candidates.find((dir) => {
-    if (platform === 'darwin') return fs.existsSync(path.join(dir, 'Electron.app', 'Contents', 'Info.plist'));
-    if (platform === 'win32') return fs.existsSync(path.join(dir, 'electron.exe')) && fs.existsSync(path.join(dir, 'resources', 'default_app.asar'));
-    return fs.existsSync(path.join(dir, 'electron')) && fs.existsSync(path.join(dir, 'resources', 'default_app.asar'));
+    if (platform === 'darwin') {
+      if (!fs.existsSync(path.join(dir, 'Electron.app', 'Contents', 'Info.plist'))) return false;
+      return binaryArch(path.join(dir, 'Electron.app', 'Contents', 'MacOS', 'Electron')) === arch;
+    }
+    if (platform === 'win32') {
+      const exe = path.join(dir, 'electron.exe');
+      return fs.existsSync(exe) && fs.existsSync(path.join(dir, 'resources', 'default_app.asar'))
+        && binaryArch(exe) === arch;
+    }
+    const bin = path.join(dir, 'electron');
+    return fs.existsSync(bin) && fs.existsSync(path.join(dir, 'resources', 'default_app.asar'))
+      && binaryArch(bin) === arch;
   });
-  if (!dist) return null;
+  if (!dist) {
+    process.stdout.write(`[package] 本机没有 ${platform}-${arch} 的 Electron dist（架构对不上就不复用），改走下载\n`);
+    return null;
+  }
   // zip 内部必须是 dist 的内容（不带顶层目录），packager 按这个约定解压
   makeZip(dist, zipPath, { contents: true });
   return zipPath;

@@ -143,6 +143,12 @@ async function main() {
     const clientSrc2 = fs.readFileSync(path.join(root, 'src', 'main', 'cli', 'client.js'), 'utf8');
     check(/START_WINDOW_MS = \d+/.test(clientSrc2) && clientSrc2.includes('recentMs = START_WINDOW_MS'),
       '「启动窗口」有唯一定义：status 说 stuck 时，serve/ensureTarget 就会清掉重来');
+    // 交叉打包的静默错误：只看平台不看架构，会把 x64 的 Electron dist 打成 "arm64" 包。
+    // 这条断言要求「按架构核对二进制头部」这件事一直在（PE / ELF / Mach-O 三种都要认）。
+    check(/function binaryArch/.test(pkgSrc) && /binaryArch\(exe\) === arch/.test(pkgSrc)
+      && /binaryArch\(bin\) === arch/.test(pkgSrc) && pkgSrc.includes('0xaa64')
+      && pkgSrc.includes('0xb7') && pkgSrc.includes('0x100000c'),
+    '交叉打包按二进制头部核对架构，不会把 x64 的 dist 冒充成 arm64');
   }
 
   try { fs.writeFileSync(path.join(os.tmpdir(), 'pvs-verify-gui.log'), ''); } catch { /* ignore */ }

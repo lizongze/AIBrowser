@@ -66,6 +66,8 @@ pvs packages --target win32 --json       # 只挑 Windows 的
 > **`--arch` 不写就只出当前架构**（本机是 x64 就只出 x64），这是最容易漏 arm64 的地方 ——
 > 所以上面的 `package:<平台>` 脚本已经把 `--arch x64,arm64` 写死了。
 > arm64 产物需要对应的 Electron 包：缓存里没有时会自动下载（`~/.cache/aibrowser-electron/`）。
+> 复用本机 `node_modules*` 里的 dist 时会**读二进制头部核对架构**（PE/ELF/Mach-O），
+> 架构对不上就直接下载 —— 不会把 x64 的 dist 打成名字叫 arm64 的包。
 
 每个平台一份产物（Electron 运行时是原生的，不能跨平台共用）；多平台**值用逗号分隔**
 （`--targets linux,win32`、`--arch x64,arm64`）；开头会打印「目标：linux-x64 linux-arm64 …」，

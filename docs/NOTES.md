@@ -459,3 +459,21 @@ Windows 上实测**唯一稳的**路径只有一个：由调用方的 shell 用
 | `serve.ps1` / `ensure-service.sh` | 轮询窗口从 20s 提到 45s（和启动窗口一致），避免把「首次解包慢」误报成失败 |
 
 验收：verify 90/90（`status` 的 `starting`/`stuck`/`hint` 与 `serve` 的字段名都有静态断言）、smoke 18/18。
+
+## 打包踩坑：`--arch arm64` 会悄悄拿 x64 的 Electron dist 冒充
+
+打 win32-arm64 时发现 `release/AIBrowser-0.1.0-win32-arm64.zip` 的字节数与 win32-x64 一模一样 ——
+因为 `zipFromInstalledDist()` 只核对「平台目录结构对不对」（有 `electron.exe` + `resources/default_app.asar`），
+**不核对架构**：`node_modules.win*` 里那份 Windows dist 是 x64，于是被原样打成名字叫 arm64 的包。
+这种错误很阴：文件名、清单、sha256 全都正常，在 Windows ARM 上还能靠 x64 模拟跑起来，
+所以可能几个月都发现不了，直到有人拿它去排查「为什么不是原生 arm64」。
+
+修法：新增 `binaryArch(file)`，直接读可执行文件头部声明的架构 ——
+PE（`MZ` → `e_lfanew` → `PE\0\0` + machine：0x8664/0xaa64）、
+ELF（`e_machine`：0x3e/0xb7）、Mach-O（`cputype`：0x1000007/0x100000c）；
+`zipFromInstalledDist()` 里三处候选都必须 `binaryArch(bin) === arch` 才复用，否则打印
+「本机没有 <平台>-<架构> 的 Electron dist（架构对不上就不复用），改走下载」并真的去下载。
+宁可多下一次 100MB，也不要产出名不副实的包。
+
+验证方式（也写进了 verify 的静态断言）：把包里的 `AIBrowser.exe` 解出来读头部 ——
+win32-arm64 包必须是 arm64、win32-x64 包必须是 x64（已实测：arm64 / x64 各就各位）。
