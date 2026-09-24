@@ -491,7 +491,38 @@ function buildMenu() {
 
 // ---------- 启动 ----------
 
+/**
+ * 单实例闸门：一个用户只该有一个常驻服务。
+ *
+ * 为什么必须自己保证：控制通道是「每用户一个固定名字的命名管道」，状态文件也只有一份。
+ * 没有这道闸门时，重复启动（agent 重试 `serve`、shim 惰性启动、用户双击）会让多个实例
+ * 互相顶掉 / 反复覆盖 state.json —— 外面看到的就是「status 一会儿 pid 活着、一会儿
+ * running:false，怎么轮询都等不到就绪」，而用户其实只是想要一个能用的服务。
+ *
+ * 放行的情况：`--smoke-test`（自检要能独立跑）与 `AIBROWSER_ALLOW_MULTIPLE=1`（测试/调试）。
+ */
+function singleInstanceReady() {
+  if (smokeTest || process.env.AIBROWSER_ALLOW_MULTIPLE === '1') return true;
+  if (app.requestSingleInstanceLock()) {
+    app.on('second-instance', () => {
+      const win = state.window;
+      if (!win || win.isDestroyed()) return;
+      try {
+        win.show();
+        win.focus();
+      } catch {
+        /* 窗口可能正在销毁 */
+      }
+    });
+    return true;
+  }
+  logErr('[aibrowser] 已有实例在运行（单实例），本次启动直接退出；要并行跑请设 AIBROWSER_ALLOW_MULTIPLE=1\n');
+  app.exit(0);
+  return false;
+}
+
 async function bootstrap() {
+  if (!singleInstanceReady()) return;
   const initialRoot = flags.root ? path.resolve(String(flags.root)) : null;
   if (initialRoot && fs.existsSync(initialRoot)) files.addRoot(initialRoot);
   if (!files.listRoots().length && flags.cwd !== false) {
@@ -540,7 +571,22 @@ async function bootstrap() {
     },
     requestShutdown: () => gracefulQuit(),
   });
-  await state.server.start({ port: flags.port ? Number(flags.port) : undefined });
+  await state.server.start({
+    port: flags.port ? Number(flags.port) : undefined,
+    takeover: flags.takeover === true,
+  });
+
+  // 二次保险：控制通道已经被另一个实例占着（例如对方是别的 userData / 老版本，单实例锁拦不住）。
+  // 这种情况下绝不再去「顶掉」对方：顶来顶去正是「怎么都起不来」的来源。
+  // 除非显式要接管（--takeover）或允许并行，否则直接退出，让调用方连上已有的那个。
+  if (state.server.existingInstance && !smokeTest
+    && process.env.AIBROWSER_ALLOW_MULTIPLE !== '1' && flags.takeover !== true) {
+    logErr(`[aibrowser] 控制通道已被其他实例占用（${state.server.state?.socket || require('./control/state').socketPath()}），`
+      + '本次启动退出；要先停掉再用 `pvs stop`（或加 --takeover 强制接管）\n');
+    await state.server.stop().catch(() => {});
+    app.exit(0);
+    return;
+  }
 
   registerHandler({
     files,

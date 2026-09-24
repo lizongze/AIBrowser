@@ -126,6 +126,16 @@ async function main() {
     const psSrc = fs.readFileSync(path.join(root, 'skills', 'aibrowser', 'scripts', 'serve.ps1'), 'utf8');
     check(psSrc.includes("'--serve', '--gui', '--json'"), 'serve.ps1 与 pvs.cmd 用同一套启动参数');
     check(!/[^\x00-\x7F]/.test(psSrc), 'serve.ps1 是纯 ASCII（PowerShell 5.1 按 ANSI 读非 BOM 脚本）');
+    // 单实例 + 不再「默默顶掉对方」：这是「重复启动互相顶掉、状态来回跳」的根因，必须锁住行为
+    const mainSrc = fs.readFileSync(path.join(root, 'src', 'main', 'main.js'), 'utf8');
+    check(mainSrc.includes('requestSingleInstanceLock') && mainSrc.includes('existingInstance'),
+      '应用是单实例：重复启动直接退出，并拒绝顶掉正在服务的那一个');
+    const serverSrc = fs.readFileSync(path.join(root, 'src', 'main', 'control', 'server.js'), 'utf8');
+    check(/adopt: takeover/.test(serverSrc) && serverSrc.includes('if (this.socketBound || !this.existingInstance)'),
+      '控制通道：默认不接管，且只在真正持有时才写 state.json（不再覆盖别人的状态）');
+    const cliSrc2 = fs.readFileSync(path.join(root, 'src', 'main', 'cli', 'index.js'), 'utf8');
+    check(cliSrc2.includes('starting: true') && cliSrc2.includes('logTail'),
+      'status 会区分「正在启动」并带上日志尾巴（调用方不用猜、也不用重复 serve）');
   }
 
   try { fs.writeFileSync(path.join(os.tmpdir(), 'pvs-verify-gui.log'), ''); } catch { /* ignore */ }
@@ -157,6 +167,30 @@ async function main() {
   const state = await waitReady();
   check(true, 'GUI 面板启动', `pid ${state.pid} · 端口 ${state.port}`);
   check(state.socketBound === true, '控制通道 socket 已绑定', state.socket);
+
+  // 第二个实例必须自己退出，且不能把正在服务的这个顶掉。
+  // （这条是「agent 重试 serve / 双击 / shim 惰性启动 → 多实例互相顶掉 → 状态来回跳」的直接回归测试。）
+  const second = spawnSync(electron, [...launchArgs, '--headless'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 20000,
+  });
+  const stillState = readState();
+  const stillAlive = Boolean(stillState) && (() => {
+    try {
+      process.kill(stillState.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  check(
+    second.status === 0 && String(second.stderr || '').includes('单实例') && stillAlive && stillState.pid === state.pid,
+    '再开一个实例会自己退出，且不顶掉正在服务的那个',
+    `exit=${second.status} 原实例 ${state.pid} ${stillAlive ? '仍在' : '没了'}`,
+  );
+  const samePort = await api('panelState').then(() => true).catch(() => false);
+  check(samePort, '第二个实例没有打断控制通道', `端口 ${state.port}`);
 
   const themeState = await api('panelState');
   check(themeState.state.themeAttr === 'light', '默认白天模式', `body[data-theme=${themeState.state.themeAttr}] · bg ${themeState.state.bodyBg}`);

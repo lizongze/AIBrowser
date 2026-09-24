@@ -405,3 +405,35 @@ Windows 上实测**唯一稳的**路径只有一个：由调用方的 shell 用
 验收：`npm run verify` 里加了 10 项静态检查（参数形状、shim 里的 `:lazy_start`、`.cmd` 纯 ASCII、
 `serve.ps1` 纯 ASCII 且参数一致、`pvs.sh` 与 `pvs.cmd` 用同一份「不该起服务」的命令名单、
 `ensure-service.sh` 不再传已删除的 `--detach` 等），全量 85/85；`npm run smoke` 18/18。
+
+## 别人还是「不能一次到位」的第二层原因：多实例互相顶掉
+
+上面那轮改完之后，别的 agent 的日志变成这样：`status` 说没在跑（但 `pidAlive:true`）→ `serve --gui`
+→ 轮询 15s 还是没起来 → 再 `serve` → 状态一会儿 pid 活着、一会儿整个 state.json 都没了 →
+`stop` → 换无头模式 → 又等 8s+6s → 最后才 `running:true`。看着像「服务起不来」，其实是**多个实例在打架**：
+
+1. **每个新实例都会「接管」**：`bindSocket(..., { adopt: true })` 的逻辑是「若已有实例应答，就请它退出、
+   然后自己绑定」。设计初衷是「重启服务」，但和 agent 的自然重试（看到没起来就再来一次 `serve`）
+   叠加起来就变成互相顶掉：谁最后启动谁赢，中间必然出现「有进程、没人应答」的空窗。
+2. **状态文件被反复覆盖**：`state.json` 每用户一份，任何实例 `start()` 都会写一遍 —— 包括**没抢到通道**的
+   实例。于是 CLI 读到的 `pid`/`port` 可能属于另一个（甚至已经退出的）实例，
+   表现就是 `running:false` 但 `pidAlive:true`、`port` 每次都不同。
+3. **正常启动窗口被误判成失败**：从 skill 包里第一次启动，Windows 要解包/扫描几百 MB，
+   十几秒不奇怪；而 `serve` 是「拉起即返回」，调用方只能靠轮询 —— 一旦它把「还没就绪」当成
+   「没在跑」，就会去启动第二个实例，直接触发上面两条。
+
+修法（都在源码里，调用方不用记规则）：
+
+| 位置 | 现在的行为 |
+| --- | --- |
+| `src/main/main.js` | `requestSingleInstanceLock()`：重复启动**直接退出**（并把已有窗口带到前台），不再顶掉正在服务的实例；`--smoke-test` 与 `AIBROWSER_ALLOW_MULTIPLE=1` 放行 |
+| `src/main/control/server.js` | `adopt` 默认关闭（只有显式 `--takeover` 才接管）；**只有真正持有控制通道的实例才写 state.json**（`existingInstance` 时不再覆盖别人的状态） |
+| `src/main/main.js` | 二次保险：若通道已被别的实例占着（例如不同 userData / 老版本，单实例锁拦不住），本次启动退出并说明原因 |
+| `commandStatus` | 新增 `starting`（进程在、通道未应答）、`socketBound`、`note`，以及没起来时的 `logFile` + `logTail`（应用日志尾巴）——「为什么没起来」直接看得见 |
+| `commandServe` | ①「已在启动中」→ 回 `{ok:true,starting:true,pid}`，**不再拉起第二个**；②「模式不同」（要面板却在跑无头）→ 先 `stop` 再起，保证说到做到；③ 报 pid 时优先读应用自己写的 state.json，不再把 PowerShell（拉起器）的 pid 当服务 pid |
+| `ensureTarget`（`open`/`shot`/…） | 同上：模式不同先停；`startingState()`（进程活着且启动时间够新）时先等 30s，等不到才当卡死清掉重来 |
+| 文档 | `status` 的三个字段各该做什么、单实例语义、别重复 `serve` |
+
+验收：`npm run verify` 新增 5 项（单实例锁、`adopt: takeover`、只在持有时写 state、status 的
+`starting`/`logTail`、以及**行为测试**：GUI 已就绪时再开一个实例必须在 20s 内以 `单实例` 退出且
+原实例仍然在线），全量 90/90。

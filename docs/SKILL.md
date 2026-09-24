@@ -94,9 +94,13 @@ $P stop                                                  # 收工
 bash <skill>/scripts/ensure-service.sh       # 拉起 + 确认就绪（幂等）
 
 # 或者自己来（serve 拉起即返回，不会卡住调用方）
-$P serve --gui --json                        # 没跑就启动
-until $P status --json | grep -q '"running":true'; do sleep 0.5; done   # 轮询到就绪（通常 2-3s）
+$P serve --gui --json                        # 没跑就启动；已在启动中会回 starting:true（不重复拉起）
+until $P status --json | grep -q '"running":true'; do sleep 0.5; done   # 轮询到就绪（首次解包可能 10-20s）
 ```
+
+**轮询时看 `starting` 字段**：`"running":true` 才是就绪；`"starting":true` 表示进程已在、通道还没应答，
+**继续等就行**（别 `stop`、也别再 `serve` —— 应用是单实例，多敲几次不会更快）。一直起不来时，
+`status` 会带上 `logFile` 与 `logTail`（应用日志尾巴），直接看原因，不用去翻目录。
 
 **Windows（PowerShell）**：直接跑 skill 的启动脚本（内部就是「`Start-Process` 拉起应用本体 + 轮询」）：
 
@@ -361,7 +365,7 @@ npm run verify    # GUI 端到端 72 项：代码渲染 / 网页渲染 / 文件�
 5. **`--json` 时 stdout 是干净的单行 JSON**：stderr 单独处理，别混着解析。
 6. **截图是物理像素**：宽高 = 逻辑尺寸 × 渲染缩放（WSLg 下默认 1.5x），不要把截图宽高当 CSS 像素用。
 7. **无头模式不会弹窗**：使用离屏渲染，适合后台长跑。
-8. **面板与无头互斥**：同一时刻只有一个进程持有控制通道，后启动者接管、旧实例退出，不需要手工清理。
+8. **面板与无头互斥且单实例**：同一时刻只有一个进程持有控制通道；重复启动会自己退出（不会顶掉正在服务的那个），不需要手工清理。换模式直接 `$P serve --gui` / `$P serve`，它会把不对的先停掉。
 9. **`pvs stop` 之后**：下一条命令会自动重新拉起实例，不必手动 `serve`。
 10. **页面看到的不是 Electron**：默认自报同版本 Windows Chrome（UA / Client Hints / platform / languages
     四处一致）。要确认真实情况看 `pvs status --json` 的 `identity`；排查时可用 `--native-ua` 关掉伪装。

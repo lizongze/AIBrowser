@@ -124,12 +124,13 @@ function probe(state, { timeoutMs = 700 } = {}) {
 /**
  * 绑定控制 socket。
  * 若已被占用：
- *   - adopt=false 且占用者可用 → 返回 { bound:false, existing:true }
- *   - adopt=true（默认，GUI 与 daemon 共用同一入口，后来者接管）
- *       → 先请求对方 shutdown，等它退出后重新绑定；对方若已死则直接清理残留文件
- *   - 占用者无响应 → 删除残留文件后重试绑定
+ *   - adopt=false（默认）且占用者可用 → 返回 { bound:false, existing:true }，本进程不再占用它。
+ *     为什么默认不接管：控制通道是「每用户一个固定名字」，接管意味着请旧实例退出 —— 和调用方的
+ *     重试（agent 看到没起来就又 serve 一次）叠加起来就成了多实例互相顶掉，谁都起不来。
+ *   - adopt=true（只有显式 --takeover 才传）→ 先请求对方 shutdown，等它退出后重新绑定
+ *   - 占用者无响应 → 删除残留文件后重试绑定（这种情况是残留，不是别人的活服务）
  */
-async function bindSocket(onRequest, { reclaim = true, adopt = true } = {}) {
+async function bindSocket(onRequest, { reclaim = true, adopt = false } = {}) {
   fs.mkdirSync(runtimeDir(), { recursive: true });
   const target = socketPath();
 

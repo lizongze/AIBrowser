@@ -8,7 +8,7 @@
 - 一个 Electron 进程 = 一个「控制器」。它监听：
   - **Unix socket**（Windows 为命名管道）`<runtimeDir>/control.sock` — CLI 控制入口，协议为 **NDJSON**（每行一个 JSON 请求，每行一个 JSON 响应）。
   - **HTTP** `127.0.0.1:<port>` — 同样能力的 REST 入口，端口写在 `<runtimeDir>/state.json`。
-- 首个进程绑定 socket；后到进程如果发现 socket 已被占用，仍会写自己的 `state.json`（后来者覆盖），从而「接管」控制入口；旧进程保留自己的会话。
+- 首个进程绑定 socket；后到进程发现 socket 已被占用时**不会接管**（返回 `existing:true`，只有显式 `--takeover` 才请旧实例退出），也不会覆盖 `state.json` —— 状态文件只由真正持有通道的那个实例写。
 - 每个进程把 `state.json` 写成：
   ```json
   { "pid": 1234, "port": 7411, "socket": "/run/user/1000/aibrowser/control.sock",

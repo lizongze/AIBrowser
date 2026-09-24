@@ -37,7 +37,27 @@ $env:AIBROWSER_BUNDLE = $bundle
 
 # 2) Nothing to do if a matching service is already running
 if (Test-Path $pvs) {
+  # starting:true means a process is already up but not answering yet (first run / unpack / AV scan
+  # can take 10-20s). Launching another app would just exit (single instance), so wait instead.
   $now = & $pvs status --json 2>$null
+  if ($now -match '"starting":true') {
+    Write-Output '[aibrowser] service is already starting, waiting for it...'
+    for ($i = 1; $i -le $TimeoutSec; $i++) {
+      Start-Sleep -Seconds 1
+      $out = & $pvs status --json 2>$null
+      if ($out -match '"running":true') {
+        Write-Output ("[aibrowser] ready after " + $i + "s")
+        Write-Output $out
+        exit 0
+      }
+      if ($out -notmatch '"starting":true') { break }
+    }
+    # Never became ready: treat it as a stuck instance, stop it and start a fresh one below.
+    Write-Output ("[aibrowser] the previous instance never became ready after " + $TimeoutSec + "s; restarting it...")
+    & $pvs stop --json 2>$null | Out-Null
+    Start-Sleep -Seconds 2
+    $now = & $pvs status --json 2>$null
+  }
   if ($now -match '"running":true') {
     if (-not $Headless -and $now -notmatch '"mode":"gui"') {
       Write-Output '[aibrowser] headless service running, restarting in panel mode...'

@@ -261,6 +261,31 @@ async function clearStaleRuntime({ sleepMs = 0 } = {}) {
   return { cleared: true, killed, pid: state.pid };
 }
 
+/**
+ * 「进程还在、但控制通道还没就绪」。
+ *
+ * 正常的启动窗口可能很长：从 skill 包里第一次启动时，Windows 要解包/扫描几百 MB 的 app.asar，
+ * 十几秒不奇怪。调用方看到 running:false 会本能地再 `serve` 一次 —— 那是把问题放大的关键，
+ * 所以这里给「该等」和「该清掉重来」一个明确判据：进程活着且启动时间够新 → 等；否则 → 清。
+ */
+function startingState({ recentMs = 120000 } = {}) {
+  const state = readState();
+  if (!state || !pidAlive(state.pid)) return null;
+  if (Date.now() - Number(state.startedAt || 0) > recentMs) return null;
+  return state;
+}
+
+/** 等应用自己写出 state.json —— 拉起器（PowerShell / spawn）的 pid 不是应用的 pid */
+async function waitForAppState({ timeoutMs = 2000, intervalMs = 200 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const state = readState();
+    if (state && pidAlive(state.pid)) return state;
+    if (Date.now() >= deadline) return null;
+    await sleep(intervalMs);
+  }
+}
+
 function waitForReady({ timeoutMs = 20000, startedAt = Date.now() } = {}) {
   return new Promise((resolve) => {
     const tick = async () => {
@@ -314,12 +339,21 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   writeStderr('[pvs] 正在后台拉起服务；若本命令长时间不返回，可改用 skill 的启动脚本：'
     + ' bash <skill>/scripts/ensure-service.sh（Windows: powershell -File <skill>\\scripts\\serve.ps1）');
 
-  // 打包版的 pvs.cmd（Windows）在调用 CLI 之前就已经用 Start-Process 把面板拉起来了
-  // （那是实测唯一稳的起法），并留下 AIBROWSER_LAZY_STARTED=1。
-  // 这里先等它一会儿：我们再拉一个的话，两个实例会抢同一个命名管道，谁都起不来。
-  if (process.env.AIBROWSER_LAZY_STARTED === '1') {
-    const grace = await waitForTarget({ prefer, timeoutMs: 20000, intervalMs: 300 });
-    if (grace.ok) return { state: grace.state, spawned: false, lazyStarted: true };
+  // 有实例在跑、但模式不对（想面板却在跑无头，或反过来）：应用是单实例，硬拉只会白等，
+  // 所以先按调用方的要求停掉它，再起一个对的模式。
+  if (found.reason === 'mode-mismatch') {
+    if (!quiet) writeStderr('[pvs] 运行中的服务模式不同，先停掉再按本次要求启动…');
+    await stopTarget();
+    await sleep(800);
+  }
+
+  // 「进程还在、通道还没就绪」= 正常的启动窗口（首次解包 + 杀软扫描可能要十几秒）或卡死的实例。
+  // 先等，不要另拉一个：应用是单实例 + 控制通道是每用户独一份的名字，重复拉起只会互相顶掉。
+  const starting = startingState();
+  if (process.env.AIBROWSER_LAZY_STARTED === '1' || starting) {
+    const grace = await waitForTarget({ prefer, timeoutMs: 30000, intervalMs: 300 });
+    if (grace.ok) return { state: grace.state, spawned: false, waited: true };
+    if (!quiet) writeStderr(`[pvs] 已有进程（pid ${starting?.pid ?? '?'}）30s 仍未就绪，按卡死处理：清掉重来`);
   }
 
   // 服务不可达但状态文件还在：可能是残留（上一个实例的命名管道还占着）。
@@ -372,6 +406,8 @@ module.exports = {
   requestOverHttp,
   waitForReady,
   waitForTarget,
+  waitForAppState,
+  startingState,
   serviceArgs,
   launchService,
   clearStaleRuntime,

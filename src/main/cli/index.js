@@ -343,9 +343,15 @@ async function commandClose(args, flags) {
 async function commandStatus(_args, flags) {
   const state = readState();
   const alive = state ? await resolveTarget({ prefer: 'auto' }) : { ok: false };
+  // 「进程活着但控制通道还没应答」= 正在启动（首次解包/杀软扫描会慢），不是「没在跑」。
+  // 这个区分很重要：否则调用方看到 running:false 就会再 serve 一次，把启动过程搅乱。
+  const starting = !alive.ok && state && pidAlive(state.pid);
   const payload = {
     ok: Boolean(alive.ok),
     running: Boolean(alive.ok),
+    starting: Boolean(starting),
+    // 已经启动多久了：调用方据此判断「再等一会」还是「真的卡住了」（首次解包 10-20s 很正常）
+    startingMs: starting ? Date.now() - Number(state.startedAt || Date.now()) : null,
     pid: state?.pid ?? null,
     pidAlive: state ? pidAlive(state.pid) : false,
     port: state?.port ?? null,
@@ -355,6 +361,8 @@ async function commandStatus(_args, flags) {
     mode: state?.mode ?? null,
     version: state?.version ?? null,
     startedAt: state?.startedAt ?? null,
+    socketBound: state?.socketBound ?? null,
+    note: state?.note ?? null,
     // 对外自报的浏览器身份：必须问「运行中的那个实例」——CLI 自己跑在普通 Node 里，
     // process.versions.chrome 不存在，本地算出来的版本号会是兜底值，容易看岔。
     identity: null,
@@ -375,19 +383,52 @@ async function commandStatus(_args, flags) {
     } catch {
       /* 老实例可能还没有这个字段 */
     }
+  } else {
+    // 没起来的时候，最有用的是「为什么」：把应用自己写的日志尾巴带上，调用方不用猜、也不用翻文件。
+    payload.logTail = readLogTail(state);
+    payload.logFile = logFileFor(state);
   }
   if (flags.json) {
     jsonOut(payload);
     return alive.ok ? EXIT_OK : EXIT_FAIL;
   }
-  out(alive.ok ? `运行中 · ${payload.mode === 'gui' ? '面板窗口' : '无头服务'} · pid ${payload.pid}` : '未运行');
+  out(alive.ok
+    ? `运行中 · ${payload.mode === 'gui' ? '面板窗口' : '无头服务'} · pid ${payload.pid}`
+    : starting ? `启动中 · pid ${payload.pid}（进程已在运行，等它就绪即可）` : '未运行');
   if (alive.ok && payload.identity) out(`  浏览器身份：${payload.identity.summary || payload.identity.mode}`);
   out(`  控制端口：${payload.port ?? '-'}`);
   out(`  socket  ：${payload.socket}`);
   out(`  令牌    ：${payload.token ?? '-'}`);
   if (payload.sessions !== null) out(`  会话数  ：${payload.sessions}`);
   if (payload.roots?.length) for (const root of payload.roots) out(`  根目录  ：[${root.id}] ${root.dir}`);
+  if (!alive.ok && payload.logTail?.length) {
+    out(`  最近日志（${payload.logFile}）：`);
+    for (const line of payload.logTail) out(`    ${line}`);
+  }
   return alive.ok ? EXIT_OK : EXIT_FAIL;
+}
+
+/** 服务日志文件：应用自己写的那份（gui.log / daemon.log） */
+function logFileFor(state) {
+  const name = state?.mode === 'daemon' ? 'daemon.log' : 'gui.log';
+  return path.join(runtimeDir(), name);
+}
+
+/** 读日志尾巴：status 里带上「为什么没起来」，比让调用方去翻文件有用得多 */
+function readLogTail(state, { lines = 12 } = {}) {
+  const files = [logFileFor(state), path.join(runtimeDir(), 'aibrowser-crash.log')];
+  const tail = [];
+  for (const file of files) {
+    try {
+      const text = fs.readFileSync(file, 'utf8').trimEnd();
+      if (!text) continue;
+      const suffix = file.endsWith('crash.log') ? '[crash] ' : '';
+      tail.push(...text.split('\n').slice(-lines).map((line) => suffix + line));
+    } catch {
+      /* 文件不存在就算了 */
+    }
+  }
+  return tail.slice(-lines);
 }
 
 // 说明：抛起服务子进程的那套（日志文件 / 参数 / Windows 的 Start-Process）现在统一在
@@ -410,10 +451,36 @@ async function commandServe(_args, flags) {
     else out(`已有${existing.state.mode === 'gui' ? '面板' : '无头服务'}在运行 · pid ${existing.state.pid} · 端口 ${existing.state.port}`);
     return EXIT_OK;
   }
+  const { waitForReady, launchService, clearStaleRuntime, startingState, waitForAppState } = require('./client');
+  // 已有实例在跑、只是模式不同（想面板却在跑无头，或反过来）：应用是单实例，硬拉只会白等到超时。
+  // 先按调用方的要求停掉它，再起一个对的模式 —— 这样 `serve --gui` / `serve` 都一定「说到做到」。
+  if (existing.reason === 'mode-mismatch') {
+    writeStderr(`[pvs] 运行中的是${existing.state?.mode === 'gui' ? '面板' : '无头'}服务，本次要求`
+      + `${wantGui ? '面板' : '无头'}：先停掉再启动…`);
+    await stopTarget();
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+  // 进程还在、只是还没就绪（首次解包 + 杀软扫描可能要十几秒）：这就是「正在启动」，直接如实上报，
+  // 不要再拉一个 —— 多实例抢同一个命名管道/状态文件正是「怎么都起不来」的根源。
+  const starting = startingState();
+  if (starting) {
+    const info = {
+      ok: true,
+      starting: true,
+      ready: false,
+      pid: starting.pid,
+      port: starting.port,
+      mode: starting.mode,
+      socket: starting.socket,
+      note: '服务正在启动（进程已在运行），继续轮询 pvs status --json，不要重复启动',
+    };
+    if (flags.json) jsonOut(info);
+    else out(`服务正在启动（pid ${starting.pid}，${starting.mode === 'gui' ? '面板' : '无头'}），用 pvs status 确认就绪`);
+    return EXIT_OK;
+  }
   // 拉起方式统一走 client.launchService：Windows 用 PowerShell 的 Start-Process
   // （实测在 agent 的 shell 里唯一稳的起法），其他平台直接 detached spawn；
   // 两者都不继承调用方的 stdout/stderr，日志由应用自己写 AIBROWSER_LOG_FILE。
-  const { waitForReady, launchService, clearStaleRuntime } = require('./client');
   const startedAt = Date.now();
   // 残留状态（上一个实例的命名管道还占着）会让新实例 bind 失败：先清掉再起，
   // 也就是手工配方里 `pvs stop` + 等 2 秒那一步。
@@ -432,6 +499,9 @@ async function commandServe(_args, flags) {
     logName: wantGui ? 'gui' : 'daemon',
     extra: guiFlags,
   });
+  // 拉起用的是 PowerShell / spawn，拿到的 pid 是**拉起器**的 pid（Windows 上尤其容易看岔：
+  // serve 说 pid 7256，status 却是 24328）。这里等一下应用自己写的 state.json，尽量报真实 pid。
+  const appState = await waitForAppState({ timeoutMs: 1500 });
   // 等待策略：**默认拉起即返回**（不等就绪）。
   // 为什么默认不等：拉起服务的调用方常常是 agent 的 shell 包装器（无控制台 + 管道的 PowerShell），
   // 它们会在我们等待期间把整条命令挂住、最后超时 kill —— 看起来像启动失败，其实服务已经起来了。
@@ -451,12 +521,20 @@ async function commandServe(_args, flags) {
       ok: true,
       spawning: true,
       ready: false,
-      pid: child.pid || null,
+      pid: appState?.pid ?? null,
+      // 应用还没写 state.json 时，pid 只能是「拉起器」的（Windows 上是 powershell）——标清楚，
+      // 免得调用方拿它去 kill / 对不上号
+      launcherPid: appState ? undefined : (child.pid || null),
       mode: wantGui ? 'gui' : 'daemon',
-      note: '服务已在后台启动；用 pvs status --json 看 "running":true',
+      note: appState
+        ? '服务已在后台启动；用 pvs status --json 看 "running":true'
+        : '正在启动（首次运行/解包会慢一点）；用 pvs status --json 轮询，不要重复 serve',
     };
     if (flags.json) jsonOut(info);
-    else out(`已在后台启动${wantGui ? '预览面板' : '无头预览服务'} · pid ${info.pid || '?'}（用 pvs status 确认就绪）`);
+    else {
+      out(`已在后台启动${wantGui ? '预览面板' : '无头预览服务'} · pid ${info.pid ?? info.launcherPid ?? '?'}`
+        + '（用 pvs status 确认就绪；首次启动可能要十几秒）');
+    }
     child.unref();
     process.exit(EXIT_OK);
   }

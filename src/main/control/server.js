@@ -119,7 +119,7 @@ class ControlServer {
     return true;
   }
 
-  async start({ port } = {}) {
+  async start({ port, takeover = false } = {}) {
     const desired = Number(port || env('PORT') || 0);
     this.server = http.createServer((req, res) => this.handleHttp(req, res));
     this.server.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head));
@@ -129,14 +129,20 @@ class ControlServer {
     });
     this.port = this.server.address().port;
 
-    const bound = await bindSocket((message) => this.dispatch(message.action, message.params || {}), { reclaim: true, adopt: true });
+    // adopt 默认关闭：以前每次启动都会「请旧实例退出、然后自己接管」，于是重复启动（agent 重试、
+    // 双击、shim 惰性启动）会互相顶掉，调用方永远等不到稳定就绪。现在只有显式 --takeover
+    // （或先 `pvs stop`）才会接管；否则本实例退回「仅 HTTP」并让调用方去连已有的那个。
+    const bound = await bindSocket((message) => this.dispatch(message.action, message.params || {}), { reclaim: true, adopt: takeover });
     this.socketServer = bound.server;
     this.socketBound = bound.bound;
+    this.existingInstance = Boolean(bound.existing);
     this.socketNote = bound.error
       ? `socket 绑定失败：${bound.error.message}`
-      : bound.reason === 'occupied'
-        ? 'socket 被其他实例占用，本次仅提供 HTTP 控制入口'
-        : null;
+      : bound.existing
+        ? '控制通道已被其他实例占用（本实例仅提供 HTTP 控制入口；用 pvs stop 后再启动可独占）'
+        : bound.reason === 'occupied'
+          ? 'socket 被其他实例占用，本次仅提供 HTTP 控制入口'
+          : null;
 
     fs.mkdirSync(runtimeDir(), { recursive: true });
     this.state = {
@@ -152,7 +158,9 @@ class ControlServer {
       socketBound: this.socketBound,
       note: this.socketNote || undefined,
     };
-    writeState(this.state);
+    // 只有真正持有控制通道的实例才写 state.json：否则会把「别人的」状态覆盖成自己的，
+    // 让 CLI 拿到一个连不上的 socket / 已经死掉的 port（这正是状态来回跳的原因之一）。
+    if (this.socketBound || !this.existingInstance) writeState(this.state);
     return this.state;
   }
 

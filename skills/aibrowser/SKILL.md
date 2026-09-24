@@ -25,7 +25,7 @@ description_cn: "用真实 Chromium 内核打开本地网页或代码文件并�
 ### 第 1 步：先看是不是已经能用
 
 ```bash
-bash <skill>/scripts/pvs.sh status     # 有输出「运行中 · …」就完事了，跳到「核心命令」
+bash <skill>/scripts/pvs.sh status --json   # running:true / starting:true 都能直接用（后者等几秒）
 ```
 
 ### 第 2 步：探测平台，优先用「自带应用的 skill 包」
@@ -198,10 +198,22 @@ node <项目>/bin/pvs.js serve --gui --json
 **启动服务**：`serve` 默认拉起即返回（不等就绪），随后用 `status` 确认：
 
 ```bash
-$P serve --gui --json    # 立刻返回 {"ok":true,"spawning":true,...}
-$P status --json         # 出现 "running":true 即可开始用
+$P serve --gui --json    # 立刻返回 {"ok":true,"spawning":true|"starting":true,...}
+$P status --json         # "running":true 即可开始用
 ```
 
+三个字段决定你下一步该干什么（**别急着重新启动**）：
+
+| status 字段 | 含义 | 你该做什么 |
+| --- | --- | --- |
+| `"running":true` | 就绪 | 干活 |
+| `"starting":true` | 进程已存在、通道还没应答（首次解包 + 杀软扫描可能要 10–20s） | **继续轮询**，不要 `serve` / `stop` |
+| 都不是，且 `logTail` 有内容 | 真的没起来 | 看 `logTail`（应用自己的日志尾巴）；要重来先 `$P stop` |
+| `"note"` 非空 | 比如「控制通道已被其他实例占用」 | 按 note 处理（通常是先 `$P stop`） |
+
+应用是**单实例**：重复 `serve` 不会拉起第二个（第二个会自己退出，也不会顶掉正在服务的那个），
+所以「多敲几次 serve」不会加速启动，只会让你误判。想换模式（无头 ↔ 面板）直接 `serve --gui` /
+`serve`，它会把不对的那个先停掉。
 要「等就绪再返回」加 `--wait`。`ensure-service.sh` 内部就是「拉起 + 轮询」。
 服务是常驻进程：仓库代码比服务新、或服务模式不是想要的，`ensure-service.sh` 会自动重启它。
 

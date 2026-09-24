@@ -17,7 +17,7 @@ const BOOLEAN_FLAGS = new Set([
   'help', 'version', 'json', 'new', 'daemon', 'gui', 'headless', 'no-spawn',
   'full-page', 'hard', 'clear', 'html', 'on', 'off', 'all', 'quiet', 'verbose', 'open', 'force-daemon',
   'hot-reload', 'no-hot-reload', 'win', 'wsl',
-  'fresh', 'keep', 'native-ua', 'text', 'human', 'no-json', 'wait', 'block',
+  'fresh', 'keep', 'native-ua', 'text', 'human', 'no-json', 'wait', 'block', 'takeover',
   'fullscreen', 'no-fullscreen', 'show-sidebar',
 ]);
 
