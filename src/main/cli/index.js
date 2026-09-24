@@ -343,15 +343,20 @@ async function commandClose(args, flags) {
 async function commandStatus(_args, flags) {
   const state = readState();
   const alive = state ? await resolveTarget({ prefer: 'auto' }) : { ok: false };
-  // 「进程活着但控制通道还没应答」= 正在启动（首次解包/杀软扫描会慢），不是「没在跑」。
-  // 这个区分很重要：否则调用方看到 running:false 就会再 serve 一次，把启动过程搅乱。
-  const starting = !alive.ok && state && pidAlive(state.pid);
+  const { START_WINDOW_MS } = require('./client');
+  // 「进程活着但控制通道还没应答」分两种：还在启动窗口内（首次解包/杀软扫描会慢）→ starting，等着就好；
+  // 超过窗口还没应答 → stuck（卡死 / 弹了模态框 / 占着锁不放）。**必须有这个上限**，否则调用方
+  // 按 starting 一直等下去就是无限等 —— 那和一直重启一样坑。
+  const startingMs = state && pidAlive(state.pid) ? Date.now() - Number(state.startedAt || 0) : null;
+  const starting = Boolean(!alive.ok && state && pidAlive(state.pid) && startingMs <= START_WINDOW_MS);
+  const stuck = Boolean(!alive.ok && state && pidAlive(state.pid) && startingMs > START_WINDOW_MS);
   const payload = {
     ok: Boolean(alive.ok),
     running: Boolean(alive.ok),
-    starting: Boolean(starting),
-    // 已经启动多久了：调用方据此判断「再等一会」还是「真的卡住了」（首次解包 10-20s 很正常）
-    startingMs: starting ? Date.now() - Number(state.startedAt || Date.now()) : null,
+    starting,
+    stuck,
+    // 已经启动多久了：调用方据此判断「再等一会」还是「真的卡住了」
+    startingMs,
     pid: state?.pid ?? null,
     pidAlive: state ? pidAlive(state.pid) : false,
     port: state?.port ?? null,
@@ -363,6 +368,12 @@ async function commandStatus(_args, flags) {
     startedAt: state?.startedAt ?? null,
     socketBound: state?.socketBound ?? null,
     note: state?.note ?? null,
+    // 下一步该干什么：状态字段只说明「现在是什么」，这里给「怎么做」。调用方不用背规则。
+    hint: alive.ok ? null
+      : starting ? `正在启动（已 ${Math.round(startingMs / 1000)}s）：继续用 pvs status --json 轮询即可，别重复启动`
+        : stuck ? `进程 ${state.pid} 还活着但控制通道超过 ${Math.round(START_WINDOW_MS / 1000)}s 没应答，已判定卡死：`
+          + '再跑一次 pvs serve --gui --json（它会自动清掉卡死实例重来），或先 pvs stop --json'
+          : '没有运行中的服务：pvs serve --gui --json（或直接 open/shot，会自动拉起）',
     // 对外自报的浏览器身份：必须问「运行中的那个实例」——CLI 自己跑在普通 Node 里，
     // process.versions.chrome 不存在，本地算出来的版本号会是兜底值，容易看岔。
     identity: null,
@@ -394,7 +405,10 @@ async function commandStatus(_args, flags) {
   }
   out(alive.ok
     ? `运行中 · ${payload.mode === 'gui' ? '面板窗口' : '无头服务'} · pid ${payload.pid}`
-    : starting ? `启动中 · pid ${payload.pid}（进程已在运行，等它就绪即可）` : '未运行');
+    : starting ? `启动中 · pid ${payload.pid}（已 ${Math.round((payload.startingMs || 0) / 1000)}s，等它就绪即可）`
+      : stuck ? `卡死了 · pid ${payload.pid}（进程还在，但控制通道 ${Math.round((payload.startingMs || 0) / 1000)}s 没应答）`
+        : '未运行');
+  if (payload.hint) out(`  → ${payload.hint}`);
   if (alive.ok && payload.identity) out(`  浏览器身份：${payload.identity.summary || payload.identity.mode}`);
   out(`  控制端口：${payload.port ?? '-'}`);
   out(`  socket  ：${payload.socket}`);
@@ -440,7 +454,10 @@ async function commandServe(_args, flags) {
   if (existing.ok) {
     const info = {
       ok: true,
+      running: true,
+      starting: false,
       alreadyRunning: true,
+      spawned: false,
       pid: existing.state.pid,
       port: existing.state.port,
       mode: existing.state.mode,
@@ -466,13 +483,15 @@ async function commandServe(_args, flags) {
   if (starting) {
     const info = {
       ok: true,
+      running: false,
       starting: true,
-      ready: false,
+      spawned: false, // 本次没有拉起新进程：正在启动的是已经存在的那个
       pid: starting.pid,
       port: starting.port,
       mode: starting.mode,
       socket: starting.socket,
-      note: '服务正在启动（进程已在运行），继续轮询 pvs status --json，不要重复启动',
+      note: '服务已经在启动中（进程已存在）：继续用 pvs status --json 轮询，'
+        + 'running:true 即可开始干活；不要重复启动（应用是单实例，重复启动不会更快）',
     };
     if (flags.json) jsonOut(info);
     else out(`服务正在启动（pid ${starting.pid}，${starting.mode === 'gui' ? '面板' : '无头'}），用 pvs status 确认就绪`);
@@ -517,18 +536,20 @@ async function commandServe(_args, flags) {
     return EXIT_FAIL;
   }
   if (!ready.ok) {
+    // 字段与 status 对齐（running / starting / pid），别再让调用方在 spawning / ready / running
+    // 之间做翻译：serve 说 starting:true 时，status 也会说 starting:true。
     const info = {
       ok: true,
-      spawning: true,
-      ready: false,
+      running: false,
+      starting: true,
+      spawned: true, // 本次确实拉起了一个新进程（starting 只表示还没就绪）
       pid: appState?.pid ?? null,
       // 应用还没写 state.json 时，pid 只能是「拉起器」的（Windows 上是 powershell）——标清楚，
       // 免得调用方拿它去 kill / 对不上号
       launcherPid: appState ? undefined : (child.pid || null),
       mode: wantGui ? 'gui' : 'daemon',
-      note: appState
-        ? '服务已在后台启动；用 pvs status --json 看 "running":true'
-        : '正在启动（首次运行/解包会慢一点）；用 pvs status --json 轮询，不要重复 serve',
+      note: '服务正在启动：用 pvs status --json 轮询，running:true 即可开始干活'
+        + '（首次启动要解包/扫描，可能要十几秒；应用是单实例，重复 serve 不会更快）',
     };
     if (flags.json) jsonOut(info);
     else {
@@ -540,6 +561,8 @@ async function commandServe(_args, flags) {
   }
   const info = {
     ok: true,
+    running: true,
+    starting: false,
     spawned: true,
     pid: ready.state.pid,
     port: ready.state.port,

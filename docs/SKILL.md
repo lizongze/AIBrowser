@@ -94,13 +94,19 @@ $P stop                                                  # 收工
 bash <skill>/scripts/ensure-service.sh       # 拉起 + 确认就绪（幂等）
 
 # 或者自己来（serve 拉起即返回，不会卡住调用方）
-$P serve --gui --json                        # 没跑就启动；已在启动中会回 starting:true（不重复拉起）
+$P serve --gui --json                        # 没跑就启动；返回 running:false + starting:true（已在启动中则 spawned:false，不重复拉起）
 until $P status --json | grep -q '"running":true'; do sleep 0.5; done   # 轮询到就绪（首次解包可能 10-20s）
 ```
 
-**轮询时看 `starting` 字段**：`"running":true` 才是就绪；`"starting":true` 表示进程已在、通道还没应答，
-**继续等就行**（别 `stop`、也别再 `serve` —— 应用是单实例，多敲几次不会更快）。一直起不来时，
-`status` 会带上 `logFile` 与 `logTail`（应用日志尾巴），直接看原因，不用去翻目录。
+**`serve` 与 `status` 的字段是同一套**（`running` / `starting` / `pid`），不用在 `spawning` / `ready`
+之间做翻译：`serve` 拉起来但还没就绪时回 `running:false,starting:true,spawned:true`，已经就绪时回
+`running:true,alreadyRunning:true`。
+
+**轮询时看 `starting` / `stuck`**：`"running":true` 才是就绪；`"starting":true` 表示进程已在、通道还没应答，
+**继续等就行**（别 `stop`、也别再 `serve` —— 应用是单实例，多敲几次不会更快）；
+**等超过 45s** 会变成 `"stuck":true`（进程卡死），这时**再跑一次 `$P serve --gui --json`** 会自动清掉它重来
+—— 所以轮询要有上限，不要无限等。`status` 每次都带 `hint`（下一步该做什么），没起来时还带
+`logFile` 与 `logTail`（应用日志尾巴），直接看原因，不用去翻目录。
 
 **Windows（PowerShell）**：直接跑 skill 的启动脚本（内部就是「`Start-Process` 拉起应用本体 + 轮询」）：
 

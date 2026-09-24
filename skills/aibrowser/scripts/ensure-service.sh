@@ -132,8 +132,9 @@ else
   start "$target"
 fi
 
-# 服务是「拉起即返回」的，这里要自己轮询到就绪（最多 20s）
-for _i in $(seq 1 40); do
+# 服务是「拉起即返回」的，这里要自己轮询到就绪。
+# 窗口对齐 CLI 的「启动窗口」（45s）：首次从包里启动要解包/杀软扫描，20s 不够时会误报失败。
+for _i in $(seq 1 90); do
   read -r running2 mode2 _stale2 <<<"$(probe "$pv" "$home")"
   [ "$running2" = "1" ] && break
   sleep 0.5

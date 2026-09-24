@@ -262,13 +262,23 @@ async function clearStaleRuntime({ sleepMs = 0 } = {}) {
 }
 
 /**
- * 「进程还在、但控制通道还没就绪」。
+ * 「还在启动」的时间窗。
  *
  * 正常的启动窗口可能很长：从 skill 包里第一次启动时，Windows 要解包/扫描几百 MB 的 app.asar，
- * 十几秒不奇怪。调用方看到 running:false 会本能地再 `serve` 一次 —— 那是把问题放大的关键，
- * 所以这里给「该等」和「该清掉重来」一个明确判据：进程活着且启动时间够新 → 等；否则 → 清。
+ * 十几秒不奇怪。所以 status 会把这段窗口内的「进程活着但通道没应答」报成 starting；
+ * **超过这个窗口就是 stuck**（卡死/弹了模态框），必须给出可执行的下一步，而不是让调用方
+ * 无限等下去 —— 「一直等」和「一直重启」都是调用方被坑的方式。
  */
-function startingState({ recentMs = 120000 } = {}) {
+const START_WINDOW_MS = 45000;
+
+/**
+ * 「进程还在、但控制通道还没就绪」。
+ *
+ * 调用方看到 running:false 会本能地再 `serve` 一次 —— 那是把问题放大的关键，
+ * 所以这里给「该等」和「该清掉重来」一个明确判据：进程活着且还在启动窗口内 → 等；否则 → 清。
+ * 窗口与 status 的 starting 用同一个常量，保证「status 说 stuck 了，serve 就会真的清掉重来」。
+ */
+function startingState({ recentMs = START_WINDOW_MS } = {}) {
   const state = readState();
   if (!state || !pidAlive(state.pid)) return null;
   if (Date.now() - Number(state.startedAt || 0) > recentMs) return null;
@@ -408,6 +418,7 @@ module.exports = {
   waitForTarget,
   waitForAppState,
   startingState,
+  START_WINDOW_MS,
   serviceArgs,
   launchService,
   clearStaleRuntime,

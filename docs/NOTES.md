@@ -437,3 +437,25 @@ Windows 上实测**唯一稳的**路径只有一个：由调用方的 shell 用
 验收：`npm run verify` 新增 5 项（单实例锁、`adopt: takeover`、只在持有时写 state、status 的
 `starting`/`logTail`、以及**行为测试**：GUI 已就绪时再开一个实例必须在 20s 内以 `单实例` 退出且
 原实例仍然在线），全量 90/90。
+
+## 第三次：字段名不统一 / starting 没有上限，调用方只能「一直等」
+
+修掉多实例之后，别的 agent 卡在另一处：`serve` 回的是
+`{"ok":true,"spawning":true,"ready":false,"note":"…看 running:true"}` ——
+**回包里根本没有 `running` 字段**，而 note 又让人去等 `running:true`，
+于是调用方的等待条件永远不成立（一直等 running 为 true）。
+同一类问题还有第二半：`status.starting` 当时只判断「进程活着 + 通道没应答」，
+**没有时间上限**，而文档又说「starting 就继续等」——卡死的实例会让调用方无限等下去。
+「盲目重启」和「无限等待」是同一个坑的两面，都得堵上。
+
+改法：
+
+| 位置 | 现在的行为 |
+| --- | --- |
+| `commandServe` | 三种结果的字段与 `status` **完全同一套**：已就绪 `{running:true,alreadyRunning:true}`；本次拉起未就绪 `{running:false,starting:true,spawned:true,pid,mode,note}`；已在启动中 `{running:false,starting:true,spawned:false,pid}`。不再出现 `spawning` / `ready` 这类没有别处对应的名字 |
+| `commandStatus` | 新增 `stuck`：进程活着但超过**启动窗口 45s** 仍没应答 → `starting:false, stuck:true`，并给出 `hint`（「再跑一次 pvs serve --gui --json，它会自动清掉卡死实例重来，或先 pvs stop」） |
+| `client.START_WINDOW_MS` | 「启动窗口」= 45s，`status.starting` 与 `client.startingState()`（serve / ensureTarget 判断「该等还是该清掉重来」）**共用同一个常量**，保证「status 说 stuck 了，serve 就真的会清掉重来」 |
+| `status.hint` | 每个非就绪结果都直接写着「下一步该做什么」，调用方不用背规则 |
+| `serve.ps1` / `ensure-service.sh` | 轮询窗口从 20s 提到 45s（和启动窗口一致），避免把「首次解包慢」误报成失败 |
+
+验收：verify 90/90（`status` 的 `starting`/`stuck`/`hint` 与 `serve` 的字段名都有静态断言）、smoke 18/18。

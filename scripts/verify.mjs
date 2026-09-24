@@ -134,8 +134,15 @@ async function main() {
     check(/adopt: takeover/.test(serverSrc) && serverSrc.includes('if (this.socketBound || !this.existingInstance)'),
       '控制通道：默认不接管，且只在真正持有时才写 state.json（不再覆盖别人的状态）');
     const cliSrc2 = fs.readFileSync(path.join(root, 'src', 'main', 'cli', 'index.js'), 'utf8');
-    check(cliSrc2.includes('starting: true') && cliSrc2.includes('logTail'),
-      'status 会区分「正在启动」并带上日志尾巴（调用方不用猜、也不用重复 serve）');
+    check(cliSrc2.includes('starting: true') && cliSrc2.includes('logTail') && cliSrc2.includes('stuck'),
+      'status 会区分「正在启动 / 卡死」并带上日志尾巴与 hint（调用方不用猜、也不用无限等）');
+    // serve 与 status 必须用同一套字段名：曾经 serve 回 spawning/ready、note 却让人等 running，
+    // 调用方的等待条件永远不成立 → 一直等。这条断言就是防它复发。
+    check(!/spawning: true/.test(cliSrc2) && /running: false,\s*\n\s*starting: true/.test(cliSrc2),
+      'serve 的字段与 status 同一套（running / starting / spawned），不再自创 spawning / ready');
+    const clientSrc2 = fs.readFileSync(path.join(root, 'src', 'main', 'cli', 'client.js'), 'utf8');
+    check(/START_WINDOW_MS = \d+/.test(clientSrc2) && clientSrc2.includes('recentMs = START_WINDOW_MS'),
+      '「启动窗口」有唯一定义：status 说 stuck 时，serve/ensureTarget 就会清掉重来');
   }
 
   try { fs.writeFileSync(path.join(os.tmpdir(), 'pvs-verify-gui.log'), ''); } catch { /* ignore */ }

@@ -13,7 +13,9 @@
 # NOTE: keep this file ASCII-only (PowerShell 5.1 reads non-BOM scripts as ANSI/GBK).
 param(
   [switch]$Headless,
-  [int]$TimeoutSec = 20
+  # 45s aligns with the CLI start window: the first launch from a skill bundle has to unpack/scan
+  # hundreds of MB on Windows, so 20s was too short and produced false "not ready" reports.
+  [int]$TimeoutSec = 45
 )
 
 $ErrorActionPreference = 'Stop'

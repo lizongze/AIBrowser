@@ -41,8 +41,8 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 | --- | --- | --- |
 | `ping` | — | `{pong,pid,mode,version,chrome,identity}`；`identity` = 对外自报的浏览器身份（默认同版本 Windows Chrome） |
 | `open` | `file` 或 `url`、`root`、`focus`、`fresh`（先关掉所有已有面板） | `{sessionId,url,title,kind}` |
-| （CLI）`serve` | `--gui`、`--wait`（等就绪再返回；默认不等） | 默认 `{ok:true,spawning:true,pid,mode}`；已有进程在启动中时 `{ok:true,starting:true,pid}`（不会重复拉起）；`--wait` 时给 `{pid,port,socket,token}` |
-| （CLI）`status` | — | `{ok,running,starting,pid,pidAlive,port,socket,token,mode,version,startedAt,socketBound,note,identity,endpoint,sessions}`；**没起来时**额外带 `logFile` 与 `logTail`（应用日志尾巴，直接看原因）。`starting:true` = 进程在、通道还没应答，继续轮询即可 |
+| （CLI）`serve` | `--gui`、`--wait`（等就绪再返回；默认不等） | **字段与 `status` 同一套**：已就绪 `{ok:true,running:true,alreadyRunning:true,pid,port,socket,token}`；本次拉起但未就绪 `{ok:true,running:false,starting:true,spawned:true,pid,mode,note}`；已在启动中 `{ok:true,running:false,starting:true,spawned:false,pid}`（不会重复拉起）；`--wait` 就绪后返回 `{running:true,pid,port,socket,token,endpoint}` |
+| （CLI）`status` | — | `{ok,running,starting,stuck,startingMs,pid,pidAlive,port,socket,token,mode,version,startedAt,socketBound,note,hint,identity,endpoint,sessions}`；**没起来时**额外带 `logFile` 与 `logTail`（应用日志尾巴，直接看原因）。`starting:true` = 进程在、通道还没应答（45s 内），继续轮询；`stuck:true` = 超过 45s 仍没应答，按 `hint` 再 `serve` 一次即可（会自动清掉卡死实例） |
 | （CLI）`stop` | — | `{ok,stopped,pid}`（通道不通时强制结束该 pid） |
 | `openCode` | `file`、`line`、`column` | `{sessionId,kind:'code',language}` |
 | `openPath` | `path`（目录自动找 index.html，按类型选网页/代码） | 同上 |

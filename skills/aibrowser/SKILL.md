@@ -195,21 +195,26 @@ node <项目>/bin/pvs.js serve --gui --json
 和用户屏幕上看到的一致。纯无头服务没有窗口，代码截图会回退成 `pvs://code/` 代码页，**只有文件内容、没有标签条**。
 需要纯无头（CI、无显示环境）时用 `AIBROWSER_GUI=0 bash scripts/ensure-service.sh`。
 
-**启动服务**：`serve` 默认拉起即返回（不等就绪），随后用 `status` 确认：
+**启动服务**：`serve` 默认拉起即返回（不等就绪），随后用 `status` 确认。
+**两个命令的字段是同一套**（`running` / `starting` / `pid`），不需要在 `spawning` / `ready` 之间做翻译：
 
 ```bash
-$P serve --gui --json    # 立刻返回 {"ok":true,"spawning":true|"starting":true,...}
+$P serve --gui --json    # {"ok":true,"running":false,"starting":true,"spawned":true,...}  没就绪时
+                         # {"ok":true,"running":true,"alreadyRunning":true,...}             已经就绪时
 $P status --json         # "running":true 即可开始用
 ```
 
-三个字段决定你下一步该干什么（**别急着重新启动**）：
+`status` 的字段决定你下一步该干什么（**轮询要有上限，别无限等、也别盲目重启**）：
 
 | status 字段 | 含义 | 你该做什么 |
 | --- | --- | --- |
 | `"running":true` | 就绪 | 干活 |
-| `"starting":true` | 进程已存在、通道还没应答（首次解包 + 杀软扫描可能要 10–20s） | **继续轮询**，不要 `serve` / `stop` |
-| 都不是，且 `logTail` 有内容 | 真的没起来 | 看 `logTail`（应用自己的日志尾巴）；要重来先 `$P stop` |
+| `"starting":true`（还有 `startingMs`） | 进程已在、通道还没应答（首次解包 + 杀软扫描 10–20s 很正常） | **继续轮询**，不要 `serve` / `stop`；轮询上限 ~45s |
+| `"stuck":true` | 进程还活着，但超过 45s 通道一直没应答（卡死 / 弹了模态框） | 直接**再跑一次 `$P serve --gui --json`**（它会自动清掉卡死实例重来），或先 `$P stop`；看 `logTail` 找原因 |
+| 都没有，`logTail` 有内容 | 真的没起来 | 看 `logTail`（应用自己的日志尾巴）；按 `hint` 做 |
 | `"note"` 非空 | 比如「控制通道已被其他实例占用」 | 按 note 处理（通常是先 `$P stop`） |
+
+每个 status 结果里还带一个 `hint` 字段，直接写着「现在该做什么」，照做即可。
 
 应用是**单实例**：重复 `serve` 不会拉起第二个（第二个会自己退出，也不会顶掉正在服务的那个），
 所以「多敲几次 serve」不会加速启动，只会让你误判。想换模式（无头 ↔ 面板）直接 `serve --gui` /
