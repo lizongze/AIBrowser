@@ -91,13 +91,17 @@ done
 
 cat <<MSG
 
-[aibrowser] 安装完成（$mode 模式）。使用前建议确认一次：
+[aibrowser] 安装完成（$mode 模式）。怎么用：
+
+  bash "$skill_dir/scripts/pvs.sh" status --json                   # 先看一眼（这条不会起服务）
+  bash "$skill_dir/scripts/pvs.sh" open ./index.html --root .      # 第一次真正干活时自动拉起服务
+
+只想自己控制时机/模式时才手动启动（两个平台命令一样的效果）：
 
   bash "$skill_dir/scripts/ensure-service.sh"                     # Linux / macOS / Git Bash
-  powershell -File "<skill>\scripts\serve.ps1"                    # Windows（面板）
-  "<skill>\scripts\serve.cmd" headless                              # Windows（无头、cmd）
+  powershell -File "<skill>\scripts\serve.ps1"                    # Windows（面板；加 -Headless 无头）
 
-之后其它 agent 调用本 skill 时，用 scripts/pvs.sh 作为 CLI 入口即可；
-Windows 上建议第一步就跑 scripts/serve.ps1（它由你自己的 shell 直接拉起应用本体，最不容易卡住）。
+之后其它 agent 调用本 skill 时，用 scripts/pvs.sh 作为 CLI 入口即可（Windows 上可直接用
+bundle\\<平台>\\pvs.cmd，它第一次真正调用时也会自己把服务拉起来）。
 $(if [ "$mode" = "link" ]; then echo "（开发模式：脚本走项目目录 $project_dir；改了代码 ensure-service.sh 会自动重启服务）"; else echo "（自带应用：脚本用 skill 内 bundle/ 里的 AIBrowser，不需要项目、node、npm）"; fi)
 MSG

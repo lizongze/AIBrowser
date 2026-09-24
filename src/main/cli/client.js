@@ -4,8 +4,10 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
-const { readState, probe, pidAlive, runtimeDir, env } = require('../control/state');
+const { readState, probe, pidAlive, runtimeDir, statePath, env } = require('../control/state');
 const { writeStderr } = require('../safe-io');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 打开子进程的日志文件（超过 2MB 先清空），并让应用自己往里写（AIBROWSER_LOG_FILE） */
 function setupChildLog(name) {
@@ -158,7 +160,105 @@ async function resolveTarget({ prefer = 'auto' } = {}) {
   if (prefer === 'gui' && state.mode !== 'gui') return { ok: false, reason: 'mode-mismatch', state };
   const alive = await probe(state, { timeoutMs: 800 });
   if (alive.ok) return { ok: true, state };
+  // 管道不通不代表服务不在：上个实例的命名管道还占着、或平台对管道路径判断不一致时，
+  // 用 HTTP /health 再确认一次。少了这一步，调用方会去拉第二个实例，两个实例抢同一个管道。
+  if (state.port) {
+    const http = await requestOverHttp(state.port, 'health', {}, { token: state.token, timeoutMs: 900 }).catch(() => null);
+    if (http) return { ok: true, state, via: 'http' };
+  }
   return { ok: false, reason: alive.reason, state };
+}
+
+/** 轮询等待控制入口就绪（用于「服务正在被别处拉起」的场合） */
+async function waitForTarget({ prefer = 'auto', timeoutMs = 20000, intervalMs = 250 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const found = await resolveTarget({ prefer });
+    if (found.ok) return { ok: true, state: found.state, via: found.via };
+    if (Date.now() >= deadline) return { ok: false, reason: found.reason || 'timeout' };
+    await sleep(intervalMs);
+  }
+}
+
+/**
+ * 服务的启动参数：`--serve --gui|--headless --json`。
+ * `--serve` 只是把「这是常驻服务」写清楚（应用本身按 --gui/--headless 决定形态）。
+ */
+function serviceArgs({ gui = false, port, extra = [] } = {}) {
+  // 打包版：可执行文件自带应用，不需要再传应用目录
+  const appArg = process.env.AIBROWSER_PACKAGED === '1' ? [] : [projectRoot()];
+  return [
+    ...appArg,
+    '--serve',
+    gui ? '--gui' : '--headless',
+    '--json',
+    ...(port ? [`--port=${port}`] : []),
+    ...extra,
+  ];
+}
+
+/**
+ * 拉起常驻服务进程。
+ *
+ * Windows 上用 PowerShell 的 `Start-Process`（ShellExecuteEx 路径）：这是实测在 agent 的
+ * 「无控制台 + 捕获输出的 PowerShell」里唯一稳的起法 —— 直接 spawn 应用时，调用方的 shell
+ * 会一直盯着这条进程链，命令看起来就像卡住了。
+ * 其他平台直接 spawn + detached 就够。
+ *
+ * 无论哪种方式，都不继承调用方的 stdout/stderr（否则长活进程握着管道，调用方读不到 EOF），
+ * 日志由应用自己写 AIBROWSER_LOG_FILE。
+ */
+function launchService({ gui = false, port, identity, logName = gui ? 'gui' : 'daemon', extra = [] } = {}) {
+  const args = serviceArgs({ gui, port, extra });
+  const childEnv = { ...process.env };
+  // 打包版 CLI 自己是以「Node 模式」跑的（shim 设了 ELECTRON_RUN_AS_NODE=1），
+  // 子进程要当真正的应用启动：必须把这个变量摘掉，否则子进程会以 Node 模式执行应用目录。
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+  if (identity) childEnv.AIBROWSER_IDENTITY = identity;
+  if (!gui) childEnv.AIBROWSER_HEADLESS = '1';
+  const logFile = setupChildLog(logName);
+  if (logFile.path) childEnv.AIBROWSER_LOG_FILE = logFile.path;
+  // 告诉子进程「你是被拉起来的常驻服务」：它会在启动最早期释放继承来的句柄
+  childEnv.AIBROWSER_DETACHED = '1';
+
+  const child = process.platform === 'win32'
+    ? spawn('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+      `Start-Process -FilePath '${ELECTRON_BIN.replace(/'/g, "''")}' `
+      + `-ArgumentList ${args.map((a) => `'${String(a).replace(/'/g, "''")}'`).join(', ')} `
+      + '-WindowStyle Hidden',
+    ], { detached: true, stdio: 'ignore', windowsHide: true, env: childEnv })
+    : spawn(ELECTRON_BIN, args, { detached: true, stdio: 'ignore', windowsHide: true, env: childEnv });
+  child.unref();
+  return { child, args, logFile };
+}
+
+/**
+ * 清掉「状态文件还在、但服务已经不可达」的残留。
+ * Windows 上命名管道被上个实例占着时，新实例会直接起不来 —— 手工配方里的
+ * `pvs stop` + 等 2 秒就是为了这个。这里做进源码，调用方不用再记这一步。
+ */
+async function clearStaleRuntime({ sleepMs = 0 } = {}) {
+  const state = readState();
+  if (!state) return { cleared: false, reason: 'no-state' };
+  const found = await resolveTarget({});
+  if (found.ok) return { cleared: false, reason: 'running' };
+  let killed = false;
+  if (pidAlive(state.pid)) {
+    try {
+      process.kill(state.pid, 'SIGTERM');
+      killed = true;
+    } catch {
+      /* 已经不在了 */
+    }
+  }
+  try {
+    fs.rmSync(statePath(), { force: true });
+  } catch {
+    /* 忽略 */
+  }
+  if (sleepMs) await sleep(sleepMs);
+  return { cleared: true, killed, pid: state.pid };
 }
 
 function waitForReady({ timeoutMs = 20000, startedAt = Date.now() } = {}) {
@@ -209,28 +309,27 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   }
 
   const headless = mode !== 'gui';
-  // 打包版：可执行文件自带应用，不需要再传应用目录
-  const appArg = process.env.AIBROWSER_PACKAGED === '1' ? [] : [projectRoot()];
-  const args = [...appArg, '--headless', ...(port ? ['--port', String(port)] : [])];
-  // 打包版 CLI 自己是以「Node 模式」跑的，子进程要当真正的应用启动：必须摘掉这个变量
-  const childEnv = { ...process.env, AIBROWSER_HEADLESS: '1' };
-  delete childEnv.ELECTRON_RUN_AS_NODE;
-  if (identity) childEnv.AIBROWSER_IDENTITY = identity;
-  // 同上：自动拉起服务时也不继承调用方的管道（否则调用方可能等不到 EOF）
-  const logFile = setupChildLog('daemon');
-  if (logFile.path) childEnv.AIBROWSER_LOG_FILE = logFile.path;
-  childEnv.AIBROWSER_DETACHED = '1'; // 子进程启动时释放继承句柄（见 safe-io.releaseInheritedStdio）
   // 先给一条「卡住怎么办」的提示：某些 agent 的 shell 包装器（无控制台 + 捕获输出的 PowerShell）
   // 会一直等这条进程链，命令看起来就像卡住了。提示要早打印，harness 超时时也能看到。
   writeStderr('[pvs] 正在后台拉起服务；若本命令长时间不返回，可改用 skill 的启动脚本：'
     + ' bash <skill>/scripts/ensure-service.sh（Windows: powershell -File <skill>\\scripts\\serve.ps1）');
 
-  const child = spawn(ELECTRON_BIN, args, {
-    detached: true,
-    stdio: 'ignore', // 三个都 ignore：不让子进程继承调用方的 stdout/stderr 管道
-    env: childEnv,
-  });
-  child.unref();
+  // 打包版的 pvs.cmd（Windows）在调用 CLI 之前就已经用 Start-Process 把面板拉起来了
+  // （那是实测唯一稳的起法），并留下 AIBROWSER_LAZY_STARTED=1。
+  // 这里先等它一会儿：我们再拉一个的话，两个实例会抢同一个命名管道，谁都起不来。
+  if (process.env.AIBROWSER_LAZY_STARTED === '1') {
+    const grace = await waitForTarget({ prefer, timeoutMs: 20000, intervalMs: 300 });
+    if (grace.ok) return { state: grace.state, spawned: false, lazyStarted: true };
+  }
+
+  // 服务不可达但状态文件还在：可能是残留（上一个实例的命名管道还占着）。
+  // 清掉再起，否则新实例会 bind EADDRINUSE 直接失败。
+  const stale = await clearStaleRuntime({ sleepMs: process.platform === 'win32' ? 1500 : 0 });
+  if (stale.cleared && !quiet) {
+    writeStderr(`[pvs] 清掉残留状态（pid ${stale.pid}${stale.killed ? ' 已结束' : ''}）后重新拉起服务`);
+  }
+
+  const { child, logFile } = launchService({ gui: !headless, port, identity, logName: headless ? 'daemon' : 'gui' });
   if (!quiet) writeStderr(`[pvs] 启动${headless ? '无头预览服务' : '预览面板'}（pid ${child.pid}）…`);
 
   const startedAt = Date.now();
@@ -272,6 +371,10 @@ module.exports = {
   requestOverSocket,
   requestOverHttp,
   waitForReady,
+  waitForTarget,
+  serviceArgs,
+  launchService,
+  clearStaleRuntime,
   runtimeDir,
   projectRoot,
 };

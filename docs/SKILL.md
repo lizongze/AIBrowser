@@ -17,8 +17,10 @@
 > ```
 
 
-**起服务**：`pvs serve --gui --json` 默认**拉起即返回**（不等就绪），随后用 `pvs status --json` 确认
-`running:true`；想要「等就绪再返回」加 `--wait`。skill 的 `scripts/ensure-service.sh` 就是「拉起 + 轮询」。
+**起服务**：第一次真正用 `pvs` 干活（`open` / `shot` / `code` …）时会**自动拉起**服务（安装时不弹窗）；
+想自己控制时机/模式再用 `pvs serve --gui --json` —— 默认**拉起即返回**（不等就绪），
+随后用 `pvs status --json` 确认 `running:true`；想要「等就绪再返回」加 `--wait`。
+skill 的 `scripts/ensure-service.sh`（Windows：`scripts/serve.ps1`）就是「拉起 + 轮询 + 清残留状态」。
 
 **先装好它**：本文件所在 skill 若是「自带应用」的包（目录里有 `bundle/<平台>-<架构>/`），
 解压后 `cp -r aibrowser ~/.agents/skills/` 就能用，不需要 node/npm；
@@ -83,25 +85,35 @@ $P stop                                                  # 收工
 
 ## 3. 典型任务配方
 
-### 3.0 起服务并确认就绪（所有配方的第一步）
+### 3.0 起服务并确认就绪（通常不用手动做）
+
+第一次真正干活的命令（`open` / `shot` / `code` …）会自己把服务拉起来，无需额外步骤。
+想自己控制时机/模式：
 
 ```bash
-bash <skill>/scripts/ensure-service.sh       # 一句搞定：拉起 + 确认就绪
+bash <skill>/scripts/ensure-service.sh       # 拉起 + 确认就绪（幂等）
 
 # 或者自己来（serve 拉起即返回，不会卡住调用方）
 $P serve --gui --json                        # 没跑就启动
 until $P status --json | grep -q '"running":true'; do sleep 0.5; done   # 轮询到就绪（通常 2-3s）
 ```
 
-**Windows（PowerShell）实测最稳的写法**——直接拉起应用本体，不经过 CLI（老包也能用）：
+**Windows（PowerShell）**：直接跑 skill 的启动脚本（内部就是「`Start-Process` 拉起应用本体 + 轮询」）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "<skill>\scripts\serve.ps1"   # 无头加 -Headless
+```
+
+等价的手写版本（源码里走的也是这条路，老包也能用）：
 
 ```powershell
 $B = "<skill>\bundle\win32-x64"
-Start-Process -FilePath "$B\AIBrowser.exe" -ArgumentList "--gui" -WindowStyle Hidden   # 无头换成 "--headless"
+Start-Process -FilePath "$B\AIBrowser.exe" -ArgumentList "--serve","--gui","--json" -WindowStyle Hidden
 for ($i = 0; $i -lt 20; $i++) { Start-Sleep -Milliseconds 500; if ((& "$B\pvs.cmd" status --json) -match '"running":true') { break } }
 ```
 
 - 已经在跑（`status` 里 `"running":true`）就不用重复启动。
+- 不想让它自动起：设 `AIBROWSER_NO_AUTO_START=1`。
 
 ### 3.1 改完前端代码自检
 
@@ -183,7 +195,7 @@ $P code ./src/app.ts --line 42 --json
 **Step 1 — 确保面板服务运行（GUI 模式）**
 
 ```bash
-bash <skill>/scripts/ensure-service.sh          # 一句搞定（拉起 + 轮询就绪）
+bash <skill>/scripts/ensure-service.sh          # 拉起 + 轮询就绪（幂等；第一次真正干活时也会自动起）
 # 或：$P serve --gui --json 然后轮询 $P status --json 到 "running":true
 ```
 
@@ -367,12 +379,14 @@ npm run verify    # GUI 端到端 72 项：代码渲染 / 网页渲染 / 文件�
 ```bash
 tar -xzf aibrowser-skill-0.1.0-linux-x64.tar.gz
 cp -r aibrowser ~/.agents/skills/
-bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh
+bash ~/.agents/skills/aibrowser/scripts/pvs.sh status --json   # 验证（不起服务）
 ```
 
 `pvs.sh` 的解析顺序：项目目录（`$PVS_HOME` / 安装记录 / 同仓库 / `PATH` 的 pvs）→ **skill 自带 bundle/**。
 自带平台按 `uname` 判定（`bundle/linux-x64`、`bundle/win32-x64`、`bundle/darwin-arm64`…），
 可用 `AIBROWSER_BUNDLE=<目录>` 指定；清单在 `bundle/manifest.json`，说明在包内 `BUNDLE.md`。
+
+安装时不起服务（面板是 GUI 窗口）；第一次真正干活的命令会自己拉起，所以上面三步之后直接就能用。
 
 ---
 

@@ -3,7 +3,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { parseArgs, HELP } = require('./args');
-const { send, ensureTarget, resolveTarget, stopTarget, electronBinary } = require('./client');
+const { send, ensureTarget, resolveTarget, stopTarget } = require('./client');
 const { readState, pidAlive, socketPath, runtimeDir } = require('../control/state');
 const { normalizePath } = require('../file-service');
 const { writeStdout, writeStderr } = require('../safe-io');
@@ -390,22 +390,8 @@ async function commandStatus(_args, flags) {
   return alive.ok ? EXIT_OK : EXIT_FAIL;
 }
 
-/** 打开子进程的日志文件（超过 2MB 先清空，避免无限增长） */
-function setupChildLog(name) {
-  try {
-    const dir = runtimeDir();
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, `${name}.log`);
-    try {
-      if (fs.statSync(file).size > 2 * 1024 * 1024) fs.writeFileSync(file, '');
-    } catch {
-      /* 文件不存在就由 openSync 新建 */
-    }
-    return { path: file, fd: fs.openSync(file, 'a') };
-  } catch {
-    return { path: null, fd: 'ignore' };
-  }
-}
+// 说明：抛起服务子进程的那套（日志文件 / 参数 / Windows 的 Start-Process）现在统一在
+// client.launchService 里，serve 与「自动拉起」走同一条路，避免两处行为不一致。
 
 async function commandServe(_args, flags) {
   const wantGui = Boolean(flags.gui);
@@ -424,58 +410,28 @@ async function commandServe(_args, flags) {
     else out(`已有${existing.state.mode === 'gui' ? '面板' : '无头服务'}在运行 · pid ${existing.state.pid} · 端口 ${existing.state.port}`);
     return EXIT_OK;
   }
-  const { spawn } = require('node:child_process');
-  const { projectRoot, waitForReady } = require('./client');
-  // 可执行文件按平台挑（共享 node_modules 里可能装的是另一平台的 Electron）；
-  // 打包版则用应用自己的可执行文件。详见 client.electronBinary()。
-  const ELECTRON_BIN = electronBinary();
+  // 拉起方式统一走 client.launchService：Windows 用 PowerShell 的 Start-Process
+  // （实测在 agent 的 shell 里唯一稳的起法），其他平台直接 detached spawn；
+  // 两者都不继承调用方的 stdout/stderr，日志由应用自己写 AIBROWSER_LOG_FILE。
+  const { waitForReady, launchService, clearStaleRuntime } = require('./client');
   const startedAt = Date.now();
-  // 子进程的 stdout/stderr 落盘到 <runtimeDir>/<mode>.log，而不是继承父进程的管道：
-  // 拉起面板的 agent shell / cmd 随时会退出，继承的管道一断，子进程每次写日志都会拿到
-  // EPIPE（Windows 上就是「A JavaScript error occurred in the main process」弹窗）。
-  // 落盘既避免这个问题，也留下可查的启动日志。
-  const logFile = setupChildLog(wantGui ? 'gui' : 'daemon');
-  // 打包版的 pvs 是「Node 模式」跑起来的（ELECTRON_RUN_AS_NODE=1），子进程要当真正的应用启动，
-  // 必须把这个变量摘掉：留着的话子进程会以 Node 模式执行应用目录，起不来（表现为「启动超时」）。
-  const childEnv = { ...process.env };
-  delete childEnv.ELECTRON_RUN_AS_NODE;
-  // 让应用自己把日志写进这个文件（下面 stdio 用 ignore，子进程拿不到我们的标准输出）
-  if (logFile.path) childEnv.AIBROWSER_LOG_FILE = logFile.path;
-  // 告诉子进程「你是被拉起来的常驻服务」：它会在启动最早期释放继承来的 stdin/stdout/stderr，
-  // 否则长活进程会一直握着调用方的管道，调用方永远等不到 EOF（表现为命令 pending）。
-  childEnv.AIBROWSER_DETACHED = '1';
+  // 残留状态（上一个实例的命名管道还占着）会让新实例 bind 失败：先清掉再起，
+  // 也就是手工配方里 `pvs stop` + 等 2 秒那一步。
+  const stale = await clearStaleRuntime({ sleepMs: process.platform === 'win32' ? 1500 : 0 });
+  if (stale.cleared) {
+    writeStderr(`[pvs] 清掉残留状态（pid ${stale.pid}${stale.killed ? ' 已结束' : ''}）后重新拉起服务`);
+  }
   const guiFlags = [];
   if (flags.fullscreen) guiFlags.push('--fullscreen');
   if (flags['no-fullscreen']) guiFlags.push('--no-fullscreen');
   if (flags['show-sidebar']) guiFlags.push('--show-sidebar');
-  // 打包版：可执行文件自带应用，不需要再传应用目录
-  const appArg = process.env.AIBROWSER_PACKAGED === '1' ? [] : [projectRoot()];
-  // stdio 三个都用 ignore：libuv 只有在「没有任何 stdio 需要继承」时才不传 bInheritHandles，
-  // 否则长活的 GUI 子进程会继承调用方（agent 的 shell）的 stdout/stderr 管道并一直握着，
-  // 调用方永远等不到 EOF → 表现就是「命令一直 pending、拿不到回传」。日志改由应用自己写文件。
-  const childArgs = [...appArg, ...(wantGui ? [] : ['--headless']), ...guiFlags, ...(flags.port ? [`--port=${flags.port}`] : [])];
-  // 拉起方式：Windows 用 PowerShell 的 Start-Process（ShellExecuteEx 路径），其他平台直接 spawn。
-  // 两者都 detached + stdio:'ignore'：子进程拿 NUL 作标准流、不继承调用方的 stdout/stderr 管道
-  // （继承的话长活的 GUI 进程会一直握着管道，调用方读不到 EOF —— 表现就是命令 pending）。
-  // 日志由应用自己写 AIBROWSER_LOG_FILE。
-  const child = (process.platform === 'win32'
-    ? spawn('powershell.exe', [
-      '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-      `Start-Process -FilePath '${ELECTRON_BIN.replace(/'/g, "''")}' `
-      + `-ArgumentList @(${childArgs.map((a) => `'${String(a).replace(/'/g, "''")}'`).join(', ')}) `
-      + '-WindowStyle Hidden',
-    ], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, ...childEnv } })
-    : spawn(ELECTRON_BIN, childArgs, {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-    env: {
-      ...childEnv,
-      ...(wantGui ? {} : { AIBROWSER_HEADLESS: '1' }),
-      ...(flags['native-ua'] || flags.identity === 'native' ? { AIBROWSER_IDENTITY: 'native' } : {}),
-      },
-    }));
-  child.unref();
+  const { child, logFile } = launchService({
+    gui: wantGui,
+    port: flags.port,
+    identity: flags['native-ua'] || flags.identity === 'native' ? 'native' : undefined,
+    logName: wantGui ? 'gui' : 'daemon',
+    extra: guiFlags,
+  });
   // 等待策略：**默认拉起即返回**（不等就绪）。
   // 为什么默认不等：拉起服务的调用方常常是 agent 的 shell 包装器（无控制台 + 管道的 PowerShell），
   // 它们会在我们等待期间把整条命令挂住、最后超时 kill —— 看起来像启动失败，其实服务已经起来了。
@@ -486,6 +442,10 @@ async function commandServe(_args, flags) {
   const ready = quickWaitMs > 0
     ? await waitForReady({ timeoutMs: quickWaitMs, startedAt })
     : { ok: false };
+  if (quickWaitMs > 0 && !ready.ok) {
+    errOut('启动超时');
+    return EXIT_FAIL;
+  }
   if (!ready.ok) {
     const info = {
       ok: true,
@@ -499,10 +459,6 @@ async function commandServe(_args, flags) {
     else out(`已在后台启动${wantGui ? '预览面板' : '无头预览服务'} · pid ${info.pid || '?'}（用 pvs status 确认就绪）`);
     child.unref();
     process.exit(EXIT_OK);
-  }
-  if (!ready.ok) {
-    errOut('启动超时');
-    return EXIT_FAIL;
   }
   const info = {
     ok: true,

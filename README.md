@@ -91,8 +91,9 @@ MCP 里对应 `browser_packages` 工具，CLI 里对应 `pvs packages`。
 ### 连 skill 一起打包（别人只要这个 skill 就能用）
 
 > 给别的 agent 的自助安装指南在 `skills/aibrowser/SKILL.md` 的**第 0 节**：
-> 先看 `dist-skill/` 有没有当前平台的包 → 解压 `cp -r aibrowser ~/.agents/skills/` → 跑
-> `scripts/ensure-service.sh`；没有包且没有仓库时问用户要，不要自己猜路径。
+> 先看 `dist-skill/` 有没有当前平台的包 → 解压 `cp -r aibrowser ~/.agents/skills/` → 用
+> `scripts/pvs.sh status --json` 验证；没有包且没有仓库时问用户要，不要自己猜路径。
+> 安装时**不起服务**（面板是 GUI 窗口），第一次真正干活的命令（`open`/`shot`/`code`）会自己拉起。
 
 ```bash
 npm run skill -- --platforms linux                 # 打出「skill + 自带应用」（linux 一份）
@@ -106,7 +107,8 @@ npm run skill -- --platforms all --combined        # 想要「一份包带多平
 ```bash
 tar -xzf aibrowser-skill-0.1.0-linux-x64.tar.gz
 cp -r aibrowser ~/.agents/skills/          # 全局；或 <项目>/.agents/skills/
-bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh
+bash ~/.agents/skills/aibrowser/scripts/pvs.sh status --json   # 验证（不起服务）
+# 之后第一次 open/shot/code 会自动拉起服务；想自己控制时机再跑 scripts/ensure-service.sh
 ```
 
 **不需要 clone 本项目、不需要 npm install、不需要装 node** —— skill 里自带 Electron 应用，
@@ -131,7 +133,7 @@ npm start            # 启动面板（默认最大化）
 ```bash
 node scripts/install-skill.mjs            # 安装到 .agents/skills 与 ~/.agents/skills（npm install 后自动执行）
 bash skills/aibrowser/install.sh          # 或安装到本机所有已知 skill 目录
-bash skills/aibrowser/scripts/ensure-service.sh   # 确保后台服务就绪（幂等）
+bash skills/aibrowser/scripts/pvs.sh status --json   # 验证；安装时不起服务，首次 open/shot 会自动拉起
 ```
 
 其它 agent 侧只需要 skill 目录，路径由 `scripts/resolve-home.sh` 自动解析：
@@ -147,8 +149,9 @@ $S shot --out /tmp/page.png --full-page --json
 | 文件 | 作用 |
 | --- | --- |
 | `SKILL.md` | 触发条件、命令速查、错误码处置（agent 读这一份就够） |
-| `scripts/pvs.sh` | CLI 包装：自动找到项目并把命令转交 `pvs` |
-| `scripts/ensure-service.sh` | 确保无头服务就绪（幂等，首次调用时自动拉起） |
+| `scripts/pvs.sh` | CLI 包装：自动找到项目并把命令转交 `pvs`（首次真正调用时惰性起服务） |
+| `scripts/ensure-service.sh` | 拉起服务并轮询到就绪（幂等，也会清掉残留状态） |
+| `scripts/serve.ps1` / `serve.cmd` | Windows 启动脚本：`Start-Process` 拉起应用本体 + 轮询就绪 |
 | `scripts/resolve-home.sh` | 路径解析（支持符号链接安装） |
 | `references/api.md` | HTTP API 与全部动作名（长驻服务场景更省开销） |
 | `install.sh` | 安装到 `~/.codex/skills`、`~/.codefree-cli/skills` 等已有目录 |

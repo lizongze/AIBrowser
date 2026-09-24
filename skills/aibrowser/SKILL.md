@@ -56,8 +56,8 @@ ls <项目>/dist-skill/aibrowser-skill-*-"$KEY".tar.gz 2>/dev/null | sort -V | t
 ```bash
 tar -xzf aibrowser-skill-<版本>-"$KEY".tar.gz
 cp -r aibrowser ~/.agents/skills/                      # 全局；只给当前项目就放 <项目>/.agents/skills/
-bash ~/.agents/skills/aibrowser/scripts/ensure-service.sh
-bash ~/.agents/skills/aibrowser/scripts/pvs.sh status  # 验证
+bash ~/.agents/skills/aibrowser/scripts/pvs.sh status  # 验证（这条命令不会起服务）
+# 安装时不起服务（面板是 GUI 窗口）：第一次真正用它（open / shot / code …）时自动拉起
 ```
 
 包里有 `bundle/<平台>-<架构>/`（自带 AIBrowser 与 `pvs`），脚本自动挑当前平台；
@@ -73,39 +73,40 @@ bash ~/.agents/skills/aibrowser/scripts/pvs.sh status  # 验证
 
 ### 第 4 步：启动服务
 
+**通常不用手动起**：第一次真正用 `pvs` 干活（`open` / `shot` / `code` …）时，入口脚本会自己把服务拉起来
+（安装时不会；面板是 GUI 窗口，第一次用到才会弹）。想自己控制时机/模式时才跑下面这条：
+
 ```bash
-SKILL=~/.agents/skills/aibrowser            # 或 <项目>/.agents/skills/aibrowser
+# Linux / macOS / WSL / Git Bash
+bash "$SKILL/scripts/ensure-service.sh"     # 拉起 + 轮询就绪（幂等，几秒返回）
 
-bash "$SKILL/scripts/ensure-service.sh"     # 一句搞定（拉起 + 轮询就绪）
-
-bash "$SKILL/scripts/pvs.sh" serve --gui --json   # 或自己拉起：立刻返回，不等就绪
-bash "$SKILL/scripts/pvs.sh" status --json        # 确认 "running":true 后开始干活
+# Windows（PowerShell）
+powershell -NoProfile -ExecutionPolicy Bypass -File "<skill>\scripts\serve.ps1"
 ```
 
-`serve` 默认**拉起即返回**（不等就绪，避免调用方的 shell 被挂住）；要「等就绪再返回」加 `--wait`。
-两三条命令之间隔一两秒即可，或者用 `pvs status --json` 轮询。
+这几条做的事一样：**拉起应用本体** + 轮询 `status --json` 到 `"running":true`。
+Windows 上源码里走的也是这条路：打包版 `pvs.cmd` 在第一次真正调用时自己 `Start-Process` 应用本体，
+CLI 的 `serve` / 自动拉起同样用 `Start-Process` 并在起之前清掉残留状态（手工配方里的 `pvs stop` + 等 2 秒）。
+所以 `pvs open …` 直接调也能一次成功；手动起只是让你控制**时机**和**模式**。
 
-**Windows（PowerShell）**：直接跑 skill 自带的启动脚本（内部就是「Start-Process 拉起应用本体 + 轮询」）：
+- 应用本体就是服务：`--gui` 表示要面板窗口，换 `--headless`（或设 `AIBROWSER_HEADLESS=1`）就是无头。
+  `--serve` 只是个说明性标志（应用按 `--gui`/`--headless` 决定形态），写不写都一样。
+- `serve` 默认**拉起即返回**（不等就绪，避免调用方的 shell 被挂住）；要「等就绪再返回」加 `--wait`。
+- 之后用 `pvs status --json` 确认 `"running":true` 再干活，或直接下一条命令（第一条命令会等它就绪）。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "<skill>\scripts\serve.ps1"        # 面板
-powershell -NoProfile -ExecutionPolicy Bypass -File "<skill>\scripts\serve.ps1" -Headless   # 无头
-```
-
-等价的手写版本（脚本不好用时照抄）：
+兜底的手写版本（脚本不好用时照抄）：
 
 ```powershell
 $B = "$env:USERPROFILE\.agents\skills\aibrowser\bundle\win32-x64"   # 换成你的实际路径
-Start-Process -FilePath "$B\AIBrowser.exe" -ArgumentList "--gui" -WindowStyle Hidden
+Start-Process -FilePath "$B\AIBrowser.exe" -ArgumentList "--serve","--gui","--json" -WindowStyle Hidden
 for ($i = 0; $i -lt 20; $i++) {
   Start-Sleep -Milliseconds 500
   if ((& "$B\pvs.cmd" status --json) -match '"running":true') { Write-Host '服务已就绪'; break }
 }
 ```
 
-- 应用本体就是服务：`--gui` 表示要面板窗口，换 `--headless`（或设 `AIBROWSER_HEADLESS=1`）就是无头。
-  `--serve` 是多余的，写不写都一样。
-- 这条路**不依赖 CLI**，因此任何版本的 skill 包都能用（老包也实测通过）。
+- 这条路**不依赖 CLI 拉起进程**，因此任何版本的 skill 包都能用（老包也实测通过）。
+- 不想让它自动起（比如只想量一下有没有在跑）：设 `AIBROWSER_NO_AUTO_START=1`。
 - 其它 shell 的等价写法（都指向同一份自带应用）：
 
 | 环境 | 启动 | 确认就绪 |
@@ -134,12 +135,12 @@ for ($i = 0; $i -lt 20; $i++) {
 
 ## 第一次调用会自动起服务（安装时不会弹窗）
 
-装完之后**不用额外操作**：第一次调用 `scripts/pvs.sh`（`open` / `shot` / `code` …）时，如果发现还没有
-运行中的服务，它会自动拉起并等到就绪（面板模式会**在那一刻**弹出一个窗口，安装时不会）。
+装完之后**不用额外操作**：第一次调用 `pvs`（skill 里的 `scripts/pvs.sh`，或 Windows 上的
+`bundle\<平台>\pvs.cmd`）做实事（`open` / `code` / `shot` …）时，如果发现还没有运行中的服务，
+它会自动拉起并等到就绪（面板模式会**在那一刻**弹出一个窗口，安装时不会）。
+只想查询状态（`status`）、停止（`stop`）、看产物（`packages`）或帮助的命令不会顺手起服务。
 
-想自己控制时机/模式，就跑下面这条：
-
-## 第一次使用：先把服务起起来（一条命令）
+## 第一次使用：自己控制时机（一条命令）
 
 ```bash
 # Linux / macOS / WSL / Git Bash
@@ -152,13 +153,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "<skill>\scripts\serve.ps1"
 "<skill>\scripts\serve.cmd"
 ```
 
-这三个脚本做的事一样：拉起服务 + 轮询到就绪，几秒内返回。**Windows 上请优先用 `serve.ps1` / `serve.cmd`**
-—— 它们由你自己的 shell 直接 `Start-Process` 拉起应用本体，绕开 CLI 那条进程链，最不容易卡住。
-（`-Headless` / `headless` 要无头服务；不加就是面板窗口。）
+这三个脚本做的事一样：拉起服务 + 轮询到就绪，几秒内返回。**Windows 上优先用 `serve.ps1` / `serve.cmd`**
+（`-Headless` / `headless` 要无头服务；不加就是面板窗口）。
 
-> 为什么强调「先跑这一条」：直接调 `pvs`（比如 `open` / `serve`）时，CLI 会自己去拉起服务；
-> 而某些 agent 的 shell 包装器（无控制台 + 捕获输出的 PowerShell）会一直等这条进程链，
-> 命令看起来就像卡住了。先由调用方自己的 shell 把服务起好，后续所有命令都只是连本地端口，秒回。
+> 为什么还能「一条命令搞定」：源码里已经统一成「用 `Start-Process` 拉起应用本体 + CLI 自己轮询」，
+> 而且打包版 `pvs.cmd` 在第一次真正调用时就自己做这一步。所以直接 `pvs open …` 也行；
+> 上面的脚本只是让你自己控制时机与模式，出问题时也是最好用的排查入口。
 
 ## 前置条件（一次即可）
 
@@ -310,7 +310,7 @@ $P batch --dir ./site --ext html                   # 收集目录下的 HTML
 ```bash
 P="$SKILL/scripts/pvs.sh"                 # 自带应用入口；开发环境可换成 node bin/pvs.js
 
-bash "$SKILL/scripts/ensure-service.sh"   # 一句搞定：拉起 + 确认就绪（面板模式）
+bash "$SKILL/scripts/ensure-service.sh"   # 拉起 + 确认就绪（面板模式）；第一次真正干活时也会自动起
 ```
 
 自己来也行（`serve` 默认拉起即返回，不会卡住调用方）：
@@ -450,7 +450,9 @@ $P packages --target win32 --json      # 让 AI 直接拿到该平台的 zip 路
 
 ## 环境与约定
 
-- **默认无头**：不弹窗口、不需要显示环境；服务首次调用时自动拉起（守护进程）。
+- **服务是常驻的**：第一次真正干活（`open`/`shot`/`code` …）时自动拉起 —— 有显示环境起**面板**（带窗口），
+  否则无头；`AIBROWSER_GUI=0` 强制无头、`AIBROWSER_NO_AUTO_START=1` 关掉自动拉起。
+  安装时不会起（面板是 GUI 窗口，不打扰用户）。
 - **用完可停**：`$P stop`（下次调用会自动重启）。
 - 截图是**物理像素**，尺寸 = 逻辑尺寸 × 渲染缩放，别把它当 CSS 像素用。
 - 控制信息在 `${XDG_RUNTIME_DIR:-$HOME}/.aibrowser/state.json`（`port` / `socket` / `token`）。

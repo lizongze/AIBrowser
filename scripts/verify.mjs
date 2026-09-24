@@ -93,6 +93,41 @@ async function waitFor(check, { timeoutMs = 8000, intervalMs = 300, label = '条
 
 async function main() {
   console.log('AIBrowser 端到端验收\n');
+
+  // ---- 启动路径（静态检查）----
+  // 目标：别人（别的 AI）第一次用就能起得来，不靠「记住某条命令」。
+  // 实测在 agent 的 shell 里唯一稳的起法是 PowerShell 的 Start-Process（直接 spawn 会让调用方
+  // 一直等这条进程链），所以源码里必须处处是这条路：CLI 的 serve/自动拉起 + 打包版 pvs.cmd。
+  {
+    const { serviceArgs } = require(path.join(root, 'src', 'main', 'cli', 'client.js'));
+    const guiArgs = serviceArgs({ gui: true });
+    const headArgs = serviceArgs({ gui: false });
+    check(guiArgs.includes('--serve') && guiArgs.includes('--gui') && guiArgs.includes('--json'),
+      'CLI 拉起服务用 --serve --gui --json', guiArgs.join(' '));
+    check(headArgs.includes('--serve') && headArgs.includes('--headless'), '无头模式用 --serve --headless', headArgs.join(' '));
+    const clientSrc = fs.readFileSync(path.join(root, 'src', 'main', 'cli', 'client.js'), 'utf8');
+    check(clientSrc.includes('Start-Process -FilePath') && clientSrc.includes('AIBROWSER_LAZY_STARTED'),
+      'CLI 在 Windows 走 Start-Process，并等待 shim 的惰性启动（不重复拉起）');
+    const pkgSrc = fs.readFileSync(path.join(root, 'scripts', 'package.mjs'), 'utf8');
+    // 锚在 shim 那段数组字面量上（`platform === 'win32'` 在文件里出现 9 次，取第一个会切错地方）
+    const shimAnchor = pkgSrc.indexOf("const lines = platform === 'win32'");
+    const cmdTemplate = pkgSrc.slice(pkgSrc.indexOf('[', shimAnchor), pkgSrc.indexOf('\n    ]', shimAnchor));
+    check(cmdTemplate.includes(':lazy_start') && cmdTemplate.includes('Start-Process -FilePath'),
+      '打包版 pvs.cmd 首次调用时自己拉起服务');
+    check(cmdTemplate.includes('AIBROWSER_NO_AUTO_START') && cmdTemplate.includes('state.json'),
+      'pvs.cmd 的惰性启动可关掉，且已有服务时不重复拉起');
+    check(!/^\s*'.*[^\x00-\x7F].*',$/m.test(cmdTemplate),
+      'pvs.cmd 模板是纯 ASCII（cmd.exe 按控制台代码页解析，非 ASCII 会炸）');
+    const ensureSrc = fs.readFileSync(path.join(root, 'skills', 'aibrowser', 'scripts', 'ensure-service.sh'), 'utf8');
+    check(!ensureSrc.includes('--detach'), 'ensure-service.sh 不再传已删除的 --detach');
+    const shSrc = fs.readFileSync(path.join(root, 'skills', 'aibrowser', 'scripts', 'pvs.sh'), 'utf8');
+    check(/AIBROWSER_NO_AUTO_START/.test(shSrc) && /''\s*\|\s*stop\s*\|\s*serve\s*\|\s*status/.test(shSrc),
+      'pvs.sh 的惰性启动与 pvs.cmd 同一份名单（查询类命令不起服务）');
+    const psSrc = fs.readFileSync(path.join(root, 'skills', 'aibrowser', 'scripts', 'serve.ps1'), 'utf8');
+    check(psSrc.includes("'--serve', '--gui', '--json'"), 'serve.ps1 与 pvs.cmd 用同一套启动参数');
+    check(!/[^\x00-\x7F]/.test(psSrc), 'serve.ps1 是纯 ASCII（PowerShell 5.1 按 ANSI 读非 BOM 脚本）');
+  }
+
   try { fs.writeFileSync(path.join(os.tmpdir(), 'pvs-verify-gui.log'), ''); } catch { /* ignore */ }
   spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'stop'], { stdio: 'ignore' });
   await sleep(1200);

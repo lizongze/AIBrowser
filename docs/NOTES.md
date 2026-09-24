@@ -371,3 +371,37 @@ DSH 从这些位置加载 skill（按优先级）：
 `npm install` 后由 `postinstall`（`scripts/install-skill.mjs`）自动把 `skills/aibrowser`
 以符号链接装到 `.agents/skills` 与 `~/.agents/skills`，因此新会话能直接发现；
 仓库内的 skill 改动会自动同步（符号链接）。手动重装：`node scripts/install-skill.mjs`。
+
+## 让「别的 AI 第一次用就走对」：把实测能跑通的启动方式做进源码
+
+现象：同一个 skill 给别人用，别人常常第一次就失败 —— 典型轨迹是
+`pvs status --json`（未运行）→ `pvs serve --gui --json` → 「启动超时」→ 再回去轮询 status。
+原因是「启动」这件事分散在好几处，每处写法还不一样：
+
+- CLI 的 `serve` 自己 spawn 子进程（在 agent 的「无控制台 + 捕获输出的 PowerShell」里，调用方会
+  一直等这条进程链，看起来就是卡住）；
+- CLI 的自动拉起（`open` 等）用的是另一套 `spawn`；
+- 打包版 `pvs.cmd` 只是转交 CLI，自己不启动任何东西；
+- 文档让人「先跑 `ensure-service.sh` / `serve.ps1`」，等于把正确性押在调用方记得某条命令上。
+
+Windows 上实测**唯一稳的**路径只有一个：由调用方的 shell 用
+`Start-Process -FilePath <AIBrowser.exe> -ArgumentList '--serve','--gui','--json' -WindowStyle Hidden`
+拉起**应用本体**，再由调用方轮询 `pvs status --json`。（以及起之前先 `stop` + 等 2 秒，
+把上个实例残留的命名管道清掉 —— 否则新实例 bind 失败。）
+
+所以现在把这条路统一到源码里，调用方不需要记任何规则：
+
+| 位置 | 现在的行为 |
+| --- | --- |
+| `src/main/cli/client.js` | `launchService()`：Windows 一律走 PowerShell `Start-Process`（其他平台直接 detached spawn），参数统一 `--serve --gui|--headless --json`；`clearStaleRuntime()`：状态文件还在但服务不可达时，杀掉残留进程 + 删 state.json + 等 1.5s |
+| `commandServe` | 复用上面两个：先清残留再拉起；默认**拉起即返回**（`--wait` 才阻塞） |
+| `ensureTarget`（`open`/`shot`/… 的自动拉起） | 同样复用；若 shim 已经拉起过（`AIBROWSER_LAZY_STARTED=1`）就先等 20s，**不再拉第二个实例**（两个实例会抢同一个命名管道） |
+| 打包版 `pvs.cmd` | 第一次真正干活的命令（非 `stop`/`status`/`packages`/`help`/`version`）在**调用 CLI 之前**自己 `Start-Process` 应用本体（面板），并清掉 `ELECTRON_RUN_AS_NODE`（否则应用会以 Node 模式启动）；`AIBROWSER_NO_AUTO_START=1` 可关掉 |
+| `serve.ps1` / `serve.cmd` | 与上面同一套参数（`--serve --gui|--headless --json`），作为「想自己控制时机」的入口 |
+
+另外 `resolveTarget()` 在没有命名管道时会用 HTTP `/health` 兜底确认，避免把「管道不通但服务活着」
+误判成需要重启（那是「明明有服务却又拉一个」的来源）。
+
+验收：`npm run verify` 里加了 10 项静态检查（参数形状、shim 里的 `:lazy_start`、`.cmd` 纯 ASCII、
+`serve.ps1` 纯 ASCII 且参数一致、`pvs.sh` 与 `pvs.cmd` 用同一份「不该起服务」的命令名单、
+`ensure-service.sh` 不再传已删除的 `--detach` 等），全量 85/85；`npm run smoke` 18/18。

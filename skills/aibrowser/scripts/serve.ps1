@@ -51,8 +51,11 @@ if (Test-Path $pvs) {
   }
 }
 
-# 3) Launch the app (Start-Process does not inherit our handles) and poll until ready
-$argList = if ($Headless) { @('--headless') } else { @('--gui') }
+# 3) Launch the app (Start-Process does not inherit our handles) and poll until ready.
+#    Same argument shape as the packaged pvs.cmd lazy start: --serve --gui|--headless --json.
+$argList = if ($Headless) { @('--serve', '--headless', '--json') } else { @('--serve', '--gui', '--json') }
+# ELECTRON_RUN_AS_NODE must not leak into the app: it would run as plain Node and never serve.
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 Start-Process -FilePath $exe -ArgumentList $argList -WindowStyle Hidden
 $modeLabel = if ($Headless) { 'headless' } else { 'panel' }
 Write-Output ("[aibrowser] started AIBrowser (" + $modeLabel + "), waiting for readiness...")

@@ -48,8 +48,9 @@ final=("${args[@]}")
 # 惰性起服务：安装时不弹窗（面板是 GUI 窗口，会打扰用户），第一次真正用到这个 skill 时，
 # 若发现还没有运行中的服务，就先拉起（用 ensure-service.sh：会自动选面板/无头、并轮询就绪）。
 # 只做「文件不存在」这种零成本判断，不会给每次调用加延迟。
+# 不需要服务的命令（查询 / 停止 / 产物 / 帮助）不动它；打包版 Windows 的 pvs.cmd 用同一份名单。
 case "$command" in
-  '' | stop | serve | status | --help | -h | help) ;;
+  '' | stop | serve | status | packages | help | -h | --help | version | -v | --version) ;;
   *)
     if [ "${AIBROWSER_NO_AUTO_START:-0}" != "1" ]; then
       if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}" ]; then
