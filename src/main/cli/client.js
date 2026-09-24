@@ -220,6 +220,11 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   const logFile = setupChildLog('daemon');
   if (logFile.path) childEnv.AIBROWSER_LOG_FILE = logFile.path;
   childEnv.AIBROWSER_DETACHED = '1'; // 子进程启动时释放继承句柄（见 safe-io.releaseInheritedStdio）
+  // 先给一条「卡住怎么办」的提示：某些 agent 的 shell 包装器（无控制台 + 捕获输出的 PowerShell）
+  // 会一直等这条进程链，命令看起来就像卡住了。提示要早打印，harness 超时时也能看到。
+  writeStderr('[pvs] 正在后台拉起服务；若本命令长时间不返回，可改用 skill 的启动脚本：'
+    + ' bash <skill>/scripts/ensure-service.sh（Windows: powershell -File <skill>\\scripts\\serve.ps1）');
+
   const child = spawn(ELECTRON_BIN, args, {
     detached: true,
     stdio: 'ignore', // 三个都 ignore：不让子进程继承调用方的 stdout/stderr 管道

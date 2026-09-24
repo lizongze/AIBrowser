@@ -132,7 +132,12 @@ else
   start "$target"
 fi
 
-read -r running2 mode2 _stale2 <<<"$(probe "$pv" "$home")"
+# 服务是「拉起即返回」的，这里要自己轮询到就绪（最多 20s）
+for _i in $(seq 1 40); do
+  read -r running2 mode2 _stale2 <<<"$(probe "$pv" "$home")"
+  [ "$running2" = "1" ] && break
+  sleep 0.5
+done
 if [ "$running2" = "1" ]; then
   echo "[aibrowser] 服务就绪："
   describe

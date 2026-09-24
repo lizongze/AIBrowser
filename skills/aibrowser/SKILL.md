@@ -85,17 +85,21 @@ bash "$SKILL/scripts/pvs.sh" status --json        # 确认 "running":true 后开
 `serve` 默认**拉起即返回**（不等就绪，避免调用方的 shell 被挂住）；要「等就绪再返回」加 `--wait`。
 两三条命令之间隔一两秒即可，或者用 `pvs status --json` 轮询。
 
-**Windows（PowerShell）实测最稳的启动方式**：直接拉起应用本体，不经过 CLI：
+**Windows（PowerShell）**：直接跑 skill 自带的启动脚本（内部就是「Start-Process 拉起应用本体 + 轮询」）：
 
 ```powershell
-$B = "$env:USERPROFILE\.codefree-o\.config\skills\aibrowser\bundle\win32-x64"   # 换成你的实际路径
-Start-Process -FilePath "$B\AIBrowser.exe" -ArgumentList "--gui" -WindowStyle Hidden
+powershell -NoProfile -ExecutionPolicy Bypass -File "<skill>\scripts\serve.ps1"        # 面板
+powershell -NoProfile -ExecutionPolicy Bypass -File "<skill>\scripts\serve.ps1" -Headless   # 无头
+```
 
-# 轮询到就绪（一般 0.5–3s）
+等价的手写版本（脚本不好用时照抄）：
+
+```powershell
+$B = "$env:USERPROFILE\.agents\skills\aibrowser\bundle\win32-x64"   # 换成你的实际路径
+Start-Process -FilePath "$B\AIBrowser.exe" -ArgumentList "--gui" -WindowStyle Hidden
 for ($i = 0; $i -lt 20; $i++) {
   Start-Sleep -Milliseconds 500
-  $r = & "$B\pvs.cmd" status --json
-  if ($r -match '"running":true') { Write-Host '服务已就绪'; break }
+  if ((& "$B\pvs.cmd" status --json) -match '"running":true') { Write-Host '服务已就绪'; break }
 }
 ```
 
@@ -127,6 +131,34 @@ for ($i = 0; $i -lt 20; $i++) {
 **Windows 注意**：skill 的脚本是 bash → 用 **Git Bash** 跑（`uname` 会给出 `MINGW64_NT`，脚本会自动选
 `bundle/win32-x64` 并调用里面的 `pvs.cmd`）；powershell / cmd 里也可以直接调
 `bundle\win32-x64\pvs.cmd status`（自带应用，同样不需要 node/npm）。
+
+## 第一次调用会自动起服务（安装时不会弹窗）
+
+装完之后**不用额外操作**：第一次调用 `scripts/pvs.sh`（`open` / `shot` / `code` …）时，如果发现还没有
+运行中的服务，它会自动拉起并等到就绪（面板模式会**在那一刻**弹出一个窗口，安装时不会）。
+
+想自己控制时机/模式，就跑下面这条：
+
+## 第一次使用：先把服务起起来（一条命令）
+
+```bash
+# Linux / macOS / WSL / Git Bash
+bash <skill>/scripts/ensure-service.sh
+
+# Windows（PowerShell）
+powershell -NoProfile -ExecutionPolicy Bypass -File "<skill>\scripts\serve.ps1"
+
+# Windows（cmd）
+"<skill>\scripts\serve.cmd"
+```
+
+这三个脚本做的事一样：拉起服务 + 轮询到就绪，几秒内返回。**Windows 上请优先用 `serve.ps1` / `serve.cmd`**
+—— 它们由你自己的 shell 直接 `Start-Process` 拉起应用本体，绕开 CLI 那条进程链，最不容易卡住。
+（`-Headless` / `headless` 要无头服务；不加就是面板窗口。）
+
+> 为什么强调「先跑这一条」：直接调 `pvs`（比如 `open` / `serve`）时，CLI 会自己去拉起服务；
+> 而某些 agent 的 shell 包装器（无控制台 + 捕获输出的 PowerShell）会一直等这条进程链，
+> 命令看起来就像卡住了。先由调用方自己的 shell 把服务起好，后续所有命令都只是连本地端口，秒回。
 
 ## 前置条件（一次即可）
 

@@ -45,6 +45,26 @@ final=("${args[@]}")
 [ "$keep" = "1" ] || final+=(--fresh)
 [ "$want_text" = "1" ] || final+=(--json)
 
+# 惰性起服务：安装时不弹窗（面板是 GUI 窗口，会打扰用户），第一次真正用到这个 skill 时，
+# 若发现还没有运行中的服务，就先拉起（用 ensure-service.sh：会自动选面板/无头、并轮询就绪）。
+# 只做「文件不存在」这种零成本判断，不会给每次调用加延迟。
+case "$command" in
+  '' | stop | serve | status | --help | -h | help) ;;
+  *)
+    if [ "${AIBROWSER_NO_AUTO_START:-0}" != "1" ]; then
+      if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}" ]; then
+        state_file="$XDG_RUNTIME_DIR/aibrowser/state.json"
+      else
+        state_file="$HOME/.aibrowser/state.json"
+      fi
+      if [ ! -f "$state_file" ]; then
+        echo "[aibrowser] 首次使用：先拉起服务 ..." >&2
+        bash "$script_dir/ensure-service.sh" >&2 || true
+      fi
+    fi
+    ;;
+esac
+
 # 1) 项目目录（开发者：$PVS_HOME / 安装记录 / 同仓库 / PATH 里的 pvs）
 if home="$(resolve_aibrowser_home)"; then
   if [ "$home" = "PATH" ]; then
