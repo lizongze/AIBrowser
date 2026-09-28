@@ -624,7 +624,7 @@ class PreviewSession {
    *   - 离屏渲染（Linux/WSLg）：等 paint 事件产出位图，必要时 invalidate 触发重绘；
    *   - Windows：离屏模式不产出帧，改用屏幕外窗口 + capturePage，并轮询等待首帧。
    */
-  async grabFrame(rect) {
+  async grabFrame(rect, { timeoutMs = 4000 } = {}) {
     const usable = (image) => {
       if (!image) return false;
       if (image.isEmpty()) return false;
@@ -646,8 +646,10 @@ class PreviewSession {
       }
     }
 
-    // 通用路径：capturePage，轮询等待首帧（页面加载/合成都需要时间）
-    const deadline = Date.now() + 10000;
+    // 通用路径：capturePage，轮询等待首帧（页面加载/合成都需要时间）。
+    // 预算默认 4s：拿不到帧多半是「这个会话不在合成场景里」（后台标签），
+    // 越早失败越好 —— 以前这里干等 10s、加上加载等待能到 25s+，调用方只会看到「卡住」。
+    const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 4000);
     while (Date.now() < deadline) {
       try {
         const shot = rect ? await this.webContents.capturePage(rect) : await this.webContents.capturePage();
@@ -699,9 +701,10 @@ class PreviewSession {
   }
 
   async screenshot({ format = 'png', quality, fullPage = false, selector } = {}) {
-    // 代码会话先把代码渲染成页面，之后走同一条截图链路
+    // 代码会话先把代码渲染成页面，之后走同一条截图链路。
+    // 加载等待收短（6s）：截图是「看一眼现在什么样」的操作，卡在这里不如快速报错 + 让调用方重试。
     await this.ensureCodePageLoaded({});
-    await this.ensureLoaded();
+    await this.ensureLoaded(6000);
     this.requireHost();
     if (selector) {
       const rect = await this.runInPage(`(() => {

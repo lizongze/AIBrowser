@@ -172,7 +172,9 @@ async function commandShot(args, flags) {
   if (flags.out) params.out = path.resolve(String(flags.out));
   else if (!flags.base64) params.out = path.resolve(`pvs-${sessionId || 'focused'}-${Date.now()}.${params.format === 'jpeg' ? 'jpg' : 'png'}`);
 
-  const result = await send('screenshot', params, { state, timeoutMs: 60000 });
+  // 30s 上限（以前 60s）：截图内部取帧只等 4s、失败会立刻报错，
+  // 真等到 30s 只会让调用方以为「卡死了」——超时上限留着是防「页面本身在加载」这种慢路径。
+  const result = await send('screenshot', params, { state, timeoutMs: 30000 });
   if (flags.json) {
     jsonOut({ ok: true, sessionId: result.sessionId, filePath: result.filePath, width: result.width, height: result.height, bytes: result.bytes, format: result.format, source: result.source });
     return EXIT_OK;
@@ -468,7 +470,7 @@ async function commandServe(_args, flags) {
     else out(`已有${existing.state.mode === 'gui' ? '面板' : '无头服务'}在运行 · pid ${existing.state.pid} · 端口 ${existing.state.port}`);
     return EXIT_OK;
   }
-  const { waitForReady, launchService, clearStaleRuntime, startingState, waitForAppState } = require('./client');
+  const { waitForReady, waitForTarget, launchService, clearStaleRuntime, startingState, waitForAppState } = require('./client');
   // 已有实例在跑、只是模式不同（想面板却在跑无头，或反过来）：应用是单实例，硬拉只会白等到超时。
   // 先按调用方的要求停掉它，再起一个对的模式 —— 这样 `serve --gui` / `serve` 都一定「说到做到」。
   if (existing.reason === 'mode-mismatch') {
@@ -479,7 +481,30 @@ async function commandServe(_args, flags) {
   }
   // 进程还在、只是还没就绪（首次解包 + 杀软扫描可能要十几秒）：这就是「正在启动」，直接如实上报，
   // 不要再拉一个 —— 多实例抢同一个命名管道/状态文件正是「怎么都起不来」的根源。
-  const starting = startingState();
+  let starting = startingState();
+  if (starting) {
+    // 先短等一下再确认：那个「活着但没应答」的进程可能正在退出（state.json 随即消失，
+    // 比如刚被 stop/杀死、还没被回收），那就别干等 —— 直接往下走清掉重来。
+    const settled = await waitForTarget({ prefer: wantGui ? 'gui' : 'daemon', timeoutMs: 1200, intervalMs: 200 });
+    if (settled.ok) {
+      const info = {
+        ok: true,
+        running: true,
+        starting: false,
+        alreadyRunning: true,
+        spawned: false,
+        pid: settled.state.pid,
+        port: settled.state.port,
+        mode: settled.state.mode,
+        socket: settled.state.socket,
+        token: settled.state.token,
+      };
+      if (flags.json) jsonOut(info);
+      else out(`已有${settled.state.mode === 'gui' ? '面板' : '无头服务'}在运行 · pid ${settled.state.pid} · 端口 ${settled.state.port}`);
+      return EXIT_OK;
+    }
+    starting = startingState();
+  }
   if (starting) {
     const info = {
       ok: true,

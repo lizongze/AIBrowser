@@ -238,13 +238,47 @@ async function runBatch(opts) {
 
       // 串行 + 逐个激活：面板模式下截图依赖「当前活动标签」，非活动标签不产生帧。
       // 每项都先把它切成活动标签再截，一项一项来。
+      // 而且整段要进 manager.runExclusive —— 与单张截图共用同一条串行队列，
+      // 否则「另一个进程同时在截图」会把这里的活动标签切走，两边都拿不到帧。
       let activated = null;
-      if (panelWindow(manager)) {
-        activated = await activateSession({ manager, session });
-        onEvent?.({ kind: 'activate', index, target, name, sessionId: session.id, activated });
-      }
+      const captureItem = async () => {
+        if (panelWindow(manager)) {
+          activated = await activateSession({ manager, session });
+          onEvent?.({ kind: 'activate', index, target, name, sessionId: session.id, activated });
+        }
 
-      await waitReady(session, item, timeout);
+        await waitReady(session, item, timeout);
+        for (let v = 0; v < viewports.length; v += 1) {
+          if (viewports[v]) applyViewport(session, viewports[v], { resize: true });
+          // 面板模式下代码会话只能截面板：它的 pvs://code/ 视图是隐藏的，隐藏视图不产生帧
+          // （表现就是「当前环境取不到渲染帧（host=view …）」一直超时）
+          let shot = null;
+          if (session.kind === 'code' && panelWindow(manager)) {
+            if (activated === false) await activateSession({ manager, session });
+            shot = await capturePanelShot({ manager, session, format: item.format || format });
+          }
+          if (!shot) {
+            shot = await session.screenshot({
+              format: item.format || format,
+              fullPage: wantFullPage,
+            });
+            shot.source = session.kind === 'code' ? 'code-page' : 'render';
+          }
+          source = shot.source;
+          const suffix = viewports.length > 1 ? `-${(viewports[v] && viewports[v].width) || 'auto'}` : '';
+          const imagePath = path.join(outAbsolute, `${String(index).padStart(3, '0')}-${name}${suffix}.${ext}`);
+          await fsp.writeFile(imagePath, shot.buffer);
+          images.push({
+            path: imagePath,
+            width: shot.width,
+            height: shot.height,
+            bytes: shot.bytes,
+            fullPage: wantFullPage,
+            source: shot.source,
+          });
+        }
+        restoreViewport(session, savedSize);
+      };
 
       // 默认**只出一张整页图**；只有显式给 item.viewports（数组）时才多尺寸
       const wantFullPage = item.fullPage !== undefined ? Boolean(item.fullPage) : fullPage;
@@ -254,36 +288,12 @@ async function runBatch(opts) {
       const ext = (item.format || format) === 'jpeg' ? 'jpg' : 'png';
       const images = [];
       let source = null;
-      for (let v = 0; v < viewports.length; v += 1) {
-        if (viewports[v]) applyViewport(session, viewports[v], { resize: true });
-        // 面板模式下代码会话只能截面板：它的 pvs://code/ 视图是隐藏的，隐藏视图不产生帧
-        // （表现就是「当前环境取不到渲染帧（host=view …）」一直超时）
-        let shot = null;
-        if (session.kind === 'code' && panelWindow(manager)) {
-          if (activated === false) await activateSession({ manager, session });
-          shot = await capturePanelShot({ manager, session, format: item.format || format });
-        }
-        if (!shot) {
-          shot = await session.screenshot({
-            format: item.format || format,
-            fullPage: wantFullPage,
-          });
-          shot.source = session.kind === 'code' ? 'code-page' : 'render';
-        }
-        source = shot.source;
-        const suffix = viewports.length > 1 ? `-${(viewports[v] && viewports[v].width) || 'auto'}` : '';
-        const imagePath = path.join(outAbsolute, `${String(index).padStart(3, '0')}-${name}${suffix}.${ext}`);
-        await fsp.writeFile(imagePath, shot.buffer);
-        images.push({
-          path: imagePath,
-          width: shot.width,
-          height: shot.height,
-          bytes: shot.bytes,
-          fullPage: wantFullPage,
-          source: shot.source,
-        });
+
+      if (panelWindow(manager) && typeof manager.runExclusive === 'function') {
+        await manager.runExclusive(captureItem);
+      } else {
+        await captureItem();
       }
-      restoreViewport(session, savedSize);
 
       let content = null;
       if (item.content) {

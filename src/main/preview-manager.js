@@ -29,6 +29,23 @@ class PreviewManager {
     this.activeViewId = null;
     /** 热重载开关（由主进程按配置/参数设置；默认关闭） */
     this.hotReload = false;
+    /**
+     * 「需要动面板」的操作（截图 / 批量截图）的串行队列。
+     * 为什么要它：面板模式下只有当前活动标签的原生视图在合成场景里，截后台会话得先把它切成活动标签 ——
+     * 两个进程同时截图时，如果没有这把锁，两边会各自切标签、把对方刚挂上的视图摘掉，
+     * 结果谁都拿不到帧、都超时。串行之后每个请求都能独占面板完成「切换 → 取帧」。
+     */
+    this._exclusive = Promise.resolve();
+  }
+
+  /**
+   * 串行执行 panelExclusive 的任务（截图/批量）。返回值与错误都照常透传；
+   * 前一个任务失败不会卡住后面的（链上做了 catch 兜底）。
+   */
+  runExclusive(task) {
+    const run = this._exclusive.then(() => task());
+    this._exclusive = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   /** 运行中切换所有会话的热重载 */

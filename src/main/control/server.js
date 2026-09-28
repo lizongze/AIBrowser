@@ -88,6 +88,122 @@ function decodeFrames(buffer) {
   return { messages, rest: rest.subarray(offset) };
 }
 
+/**
+ * 真正干活的截图实现（被 screenshot 动作在串行队列里调用）。
+ *
+ * 两条路径：
+ *   1) **面板模式**：先把目标会话切成活动标签 —— 面板里只有活动标签的原生视图在合成场景里，
+ *      后台标签 capturePage 只会拿到空帧（这就是「后台网页截不了图」的原因）。
+ *   2) 无面板（无头）：代码会话走 pvs://code/ 代码页渲染，网页会话走离屏渲染帧。
+ *
+ * 都失败时不再傻等：session.screenshot() 内部取帧预算 4s，出错信息里带 host/visible/loading 现场。
+ */
+async function captureSessionShot({ manager, session, params = {} }) {
+  const win = panelWindow(manager);
+  // 别的进程可能正在 open/切标签（它不走这把锁：open 会等页面加载，不该把截图堵在它后面）。
+  // 所以「抢活动标签 → 取帧」允许抢两次：取完发现标签已被别人切走，就再抢一次，
+  // 否则会截到别人的页面（或干脆空帧超时）。
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const attemptResult = await captureOnce({ manager, session, params, win });
+    if (!win || manager.activeViewId === session.id || attempt === 2) return attemptResult;
+    await sleep(120);
+  }
+  return null;
+}
+
+async function captureOnce({ manager, session, params = {}, win }) {
+  // 面板模式：不管代码还是网页，先让目标会话产生帧
+  const activated = win ? await activateSession({ manager, session }) : false;
+
+  // 面板模式下的代码会话优先「截面板」：含标签条与行号栏，和用户看到的画面一致。
+  // （它的 pvs://code/ 原生视图是隐藏的，隐藏视图不产生帧。）
+  if (win && session.kind === 'code' && session.file) {
+    const shot = await capturePanelShot({ manager, session, format: params.format, quality: params.quality });
+    if (shot) {
+      const result = {
+        sessionId: session.id,
+        format: shot.format,
+        width: shot.width,
+        height: shot.height,
+        bytes: shot.bytes,
+        dataBase64: shot.buffer.toString('base64'),
+        buffer: shot.buffer,
+        source: 'panel',
+        activated,
+      };
+      if (params.out !== undefined && params.out !== null) {
+        const out = params.out ? path.resolve(String(params.out)) : path.join(os.tmpdir(), `pvs-panel-${session.id}-${Date.now()}.png`);
+        await fsp.mkdir(path.dirname(out), { recursive: true });
+        await fsp.writeFile(out, shot.buffer);
+        result.filePath = out;
+      }
+      return result;
+    }
+  }
+
+  const urlBefore = session.url;
+  let shot = null;
+  try {
+    shot = await session.screenshot({
+      format: params.format || 'png',
+      quality: params.quality,
+      fullPage: Boolean(params.fullPage ?? params.full_page),
+      selector: params.selector,
+    });
+  } catch (err) {
+    // 面板模式下取不到帧时的兜底：整块面板截一张（里面就有这个标签的渲染结果）。
+    // 比「超时报错」有用得多 —— 调用方拿到的是图，source 会标成 panel 让它知道含标签条。
+    if (win) {
+      const fallback = await capturePanelShot({ manager, session, format: params.format, quality: params.quality }).catch(() => null);
+      if (fallback) {
+        const result = {
+          sessionId: session.id,
+          format: fallback.format,
+          width: fallback.width,
+          height: fallback.height,
+          bytes: fallback.bytes,
+          dataBase64: fallback.buffer.toString('base64'),
+          buffer: fallback.buffer,
+          source: 'panel',
+          activated,
+          note: `取会话帧失败（${err.message}），已回退为面板截图`,
+        };
+        if (params.out !== undefined && params.out !== null) {
+          const out = params.out ? path.resolve(String(params.out)) : path.join(os.tmpdir(), `pvs-panel-${session.id}-${Date.now()}.png`);
+          await fsp.mkdir(path.dirname(out), { recursive: true });
+          await fsp.writeFile(out, fallback.buffer);
+          result.filePath = out;
+        }
+        return result;
+      }
+    }
+    throw err;
+  }
+  // 代码会话回退到代码页截图后，恢复到原本的会话标识，界面不应显示成 pvs://code/
+  if (session.kind === 'code' && urlBefore) session.url = urlBefore;
+  const result = {
+    sessionId: shot.sessionId,
+    format: shot.format,
+    width: shot.width,
+    height: shot.height,
+    bytes: shot.bytes,
+    source: session.kind === 'code' ? 'code-page' : 'render',
+    activated,
+  };
+  if (params.raw) return { ...result, buffer: shot.buffer };
+  if (params.out !== undefined || params.out === null) {
+    const out = params.out ? path.resolve(String(params.out)) : path.join(os.tmpdir(), `pvs-${session.id}-${Date.now()}.${shot.format}`);
+    await fsp.mkdir(path.dirname(out), { recursive: true });
+    await fsp.writeFile(out, shot.buffer);
+    result.filePath = out;
+  }
+  if (params.data !== false) result.dataBase64 = shot.dataBase64;
+  result.buffer = shot.buffer;
+  return result;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 class ControlServer {
   /**
    * @param {object} deps
@@ -473,61 +589,14 @@ class ControlServer {
 
       case 'screenshot': {
         const session = manager.resolve(params.sessionId);
-        // 代码会话在 GUI 下优先「截面板」：包含标签条与行号栏，和用户看到的画面一致；
-        // 无头模式没有面板，则退回 screenshot() 内部的代码页渲染。
-        // 注意：面板模式下代码页面的原生视图是隐藏的（面板用 CodeMirror 显示），隐藏视图不产生帧。
-        if (session.kind === 'code' && session.file && panelWindow(manager)) {
-          const activated = await activateSession({ manager, session });
-          const shot = await capturePanelShot({ manager, session, format: params.format, quality: params.quality });
-          if (shot) {
-            const result = {
-              sessionId: session.id,
-              format: shot.format,
-              width: shot.width,
-              height: shot.height,
-              bytes: shot.bytes,
-              dataBase64: shot.buffer.toString('base64'),
-              buffer: shot.buffer,
-              source: 'panel',
-              activated,
-            };
-            if (params.out !== undefined && params.out !== null) {
-              const out = params.out ? path.resolve(String(params.out)) : path.join(os.tmpdir(), `pvs-panel-${session.id}-${Date.now()}.png`);
-              await fsp.mkdir(path.dirname(out), { recursive: true });
-              await fsp.writeFile(out, shot.buffer);
-              result.filePath = out;
-            }
-            return result;
-          }
+        // 面板模式下「只有活动标签的原生视图在合成场景里」：截后台会话必须先把它切成活动标签，
+        // 否则 capturePage 永远是空帧（表现就是「后台网页截图超时」）。
+        // 并发调用交给 manager.runExclusive 串行：否则两个进程各自切标签、互相把对方的视图摘掉，谁都截不到。
+        const capture = () => captureSessionShot({ manager, session, params });
+        if (panelWindow(manager) && typeof manager.runExclusive === 'function') {
+          return manager.runExclusive(capture);
         }
-        const urlBefore = session.url;
-        const shot = await session.screenshot({
-          format: params.format || 'png',
-          quality: params.quality,
-          fullPage: Boolean(params.fullPage ?? params.full_page),
-          selector: params.selector,
-        });
-        // 代码会话回退到代码页截图后，恢复到原本的会话标识，界面不应显示成 pvs://code/
-        if (session.kind === 'code' && urlBefore) session.url = urlBefore;
-        const result = {
-          sessionId: shot.sessionId,
-          format: shot.format,
-          width: shot.width,
-          height: shot.height,
-          bytes: shot.bytes,
-          // 这里没有面板可截：代码会话是 pvs://code/ 代码页渲染，网页会话是离屏/原生视图
-          source: session.kind === 'code' ? 'code-page' : 'render',
-        };
-        if (params.raw) return { ...result, buffer: shot.buffer };
-        if (params.out !== undefined || params.out === null) {
-          const out = params.out ? path.resolve(String(params.out)) : path.join(os.tmpdir(), `pvs-${session.id}-${Date.now()}.${shot.format}`);
-          await fsp.mkdir(path.dirname(out), { recursive: true });
-          await fsp.writeFile(out, shot.buffer);
-          result.filePath = out;
-        }
-        if (params.data !== false) result.dataBase64 = shot.dataBase64;
-        result.buffer = shot.buffer;
-        return result;
+        return capture();
       }
 
       case 'content': {

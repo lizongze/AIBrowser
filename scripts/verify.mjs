@@ -145,6 +145,15 @@ async function main() {
       '「启动窗口」有唯一定义：status 说 stuck 时，serve/ensureTarget 就会清掉重来');
     // 交叉打包的静默错误：只看平台不看架构，会把 x64 的 Electron dist 打成 "arm64" 包。
     // 这条断言要求「按架构核对二进制头部」这件事一直在（PE / ELF / Mach-O 三种都要认）。
+    // 截图并发/后台标签：面板模式下非活动标签不产生帧，必须「先切标签再截」并串行化
+    const serverSrc2 = fs.readFileSync(path.join(root, 'src', 'main', 'control', 'server.js'), 'utf8');
+    const mgrSrc = fs.readFileSync(path.join(root, 'src', 'main', 'preview-manager.js'), 'utf8');
+    check(mgrSrc.includes('runExclusive') && serverSrc2.includes('runExclusive(capture)')
+      && serverSrc2.includes('captureSessionShot'),
+    '截图走串行队列 + 先激活目标标签（后台网页/并发不再空帧超时）');
+    const shotSessionSrc = fs.readFileSync(path.join(root, 'src', 'main', 'preview-session.js'), 'utf8');
+    check(/grabFrame\(rect, \{ timeoutMs = \d+ \}/.test(shotSessionSrc),
+      '取帧有明确预算（拿不到帧快速失败，不再让调用方干等十几秒）');
     check(/function binaryArch/.test(pkgSrc) && /binaryArch\(exe\) === arch/.test(pkgSrc)
       && /binaryArch\(bin\) === arch/.test(pkgSrc) && pkgSrc.includes('0xaa64')
       && pkgSrc.includes('0xb7') && pkgSrc.includes('0x100000c'),
@@ -620,6 +629,28 @@ async function main() {
   }, { label: '缩放重置' });
   check(resetZoom.ok, '重置界面缩放回到 100%', resetZoom.detail);
 
+  // 后台标签 + 并发截图：面板里只有活动标签的视图在合成场景里，后台会话曾经必然空帧超时；
+  // 两个进程同时截图时还会互相切标签，谁都拿不到帧。这里同时验证这两件事。
+  {
+    const bgA = await api('openPath', { path: htmlFile });
+    const bgB = await api('openPath', { path: path.join(root, 'examples', 'font-compare.html') });
+    await sleep(800);
+    const started = Date.now();
+    const [shA, shB] = await Promise.all([
+      api('screenshot', { sessionId: bgA.sessionId, format: 'png', data: false, out: path.join(root, '.aibrowser', 'verify-bg-a.png') }),
+      api('screenshot', { sessionId: bgB.sessionId, format: 'png', data: false, out: path.join(root, '.aibrowser', 'verify-bg-b.png') }),
+    ]);
+    check(shA.bytes > 2000 && shB.bytes > 2000,
+      '后台标签 + 并发截图都能拿到帧（不再空帧超时）',
+      `A ${Math.round(shA.bytes / 1024)}KB · B ${Math.round(shB.bytes / 1024)}KB · ${Date.now() - started}ms`);
+    check(shA.sessionId === bgA.sessionId && shB.sessionId === bgB.sessionId && shA.bytes !== shB.bytes,
+      '并发截到的两张图各自属于对应会话（没有串台）',
+      `${shA.width}×${shA.height} / ${shB.width}×${shB.height}`);
+    await api('close', { sessionId: bgA.sessionId });
+    await api('close', { sessionId: bgB.sessionId });
+    await sleep(400);
+  }
+
   // 批量：混合 HTML + 代码文件，串行逐个激活标签再截；代码项在产品模式下必须走面板截图
   const batchDir = path.join(root, '.aibrowser', 'verify-batch');
   const sessionsBeforeBatch = (await api('list')).sessions.length;
@@ -719,7 +750,26 @@ async function main() {
   await sleep(400);
 
   await api('shutdown');
-  await sleep(1500);
+  // 等实例**真的退出**再往下走：应用是单实例（Electron 会在进程退出时才释放锁），
+  // 上一个实例还没死透就 spawn 下一个，会被单实例闸门挡掉 —— 那是设计行为，不是失败。
+  {
+    const prev = readState();
+    const by = Date.now() + 8000;
+    while (Date.now() < by) {
+      let alive = false;
+      if (prev?.pid) {
+        try {
+          process.kill(prev.pid, 0);
+          alive = true;
+        } catch {
+          alive = false;
+        }
+      }
+      if (!alive) break;
+      await sleep(200);
+    }
+    await sleep(400);
+  }
 
   // 面板常由「别的进程」拉起来（agent shell / cmd / npm），父进程一退管道就断，
   // 之后每次写日志都会 EPIPE —— 之前会在 Windows 上弹「A JavaScript error occurred
@@ -761,8 +811,28 @@ async function main() {
     }
     const alive = child.exitCode === null;
     child.kill('SIGTERM');
-    await sleep(800);
-    return { ready, alive, pid: child.pid, mode: lastState?.mode || null };
+    // 等它真的退出：不然后面的 `pvs serve` 会看到「pid 还在、通道已断」的残留状态，
+    // 按设计会先判成「正在启动」而不去拉起新的（那是给「首次解包慢」留的窗口）。
+    const goneBy = Date.now() + 8000;
+    let gone = false;
+    while (Date.now() < goneBy) {
+      try {
+        process.kill(child.pid, 0);
+      } catch {
+        gone = true;
+        break;
+      }
+      await sleep(200);
+    }
+    if (gone) {
+      try {
+        fs.rmSync(statePath, { force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    await sleep(300);
+    return { ready, alive, pid: child.pid, mode: lastState?.mode || null, gone };
   })();
   check(pipeProbe.ready && pipeProbe.alive, '日志管道断开（EPIPE）时进程照常起来',
     `ready=${pipeProbe.ready} alive=${pipeProbe.alive} pid=${pipeProbe.pid} mode=${pipeProbe.mode}`);
