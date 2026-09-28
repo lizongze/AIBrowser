@@ -857,6 +857,30 @@ async function main() {
     'CLI 拉起的实例把日志写在 runtimeDir（不继承父进程管道）',
     logPathGuess,
   );
+  // 已有无头服务时，直接启动应用（等价于双击 AIBrowser.exe）应该**接管成面板**，
+  // 而不是因为单实例锁静默退出 —— 后者在用户眼里就是「双击了没反应、启动不了」。
+  const takeover = await (async () => {
+    // 先等上面的 daemon 真的写出 state.json（`pvs serve` 是拉起即返回的）
+    let before = readState();
+    const readyBy = Date.now() + 20000;
+    while ((!before || before.mode !== 'daemon') && Date.now() < readyBy) {
+      await sleep(300);
+      before = readState();
+    }
+    if (before?.mode !== 'daemon') return { ok: false, detail: `前置状态不是 daemon（${before?.mode || 'none'}）` };
+    const gui = spawn(electron, launchArgs, { cwd: root, detached: true, stdio: 'ignore' });
+    gui.unref();
+    const by = Date.now() + 25000;
+    while (Date.now() < by) {
+      const now = readState();
+      if (now?.mode === 'gui' && now.pid !== before.pid) {
+        return { ok: true, detail: `无头 ${before.pid} → 面板 ${now.pid}` };
+      }
+      await sleep(300);
+    }
+    return { ok: false, detail: '25s 内没接管成面板' };
+  })();
+  check(takeover.ok, '无头服务在跑时，直接启动应用会接管成面板（不再静默退出）', takeover.detail);
   spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'stop'], { stdio: 'ignore' });
 
   console.log('\n--- GUI 启动日志 ---');

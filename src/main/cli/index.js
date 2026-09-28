@@ -432,7 +432,9 @@ function logFileFor(state) {
 
 /** 读日志尾巴：status 里带上「为什么没起来」，比让调用方去翻文件有用得多 */
 function readLogTail(state, { lines = 12 } = {}) {
-  const files = [logFileFor(state), path.join(runtimeDir(), 'aibrowser-crash.log')];
+  // 也带上拉起器的日志（Windows 上 Start-Process 的报错会写在这里）：
+  // 「装了错架构的包」「可执行文件被删了」这类启动失败只有它说得清。
+  const files = [logFileFor(state), path.join(runtimeDir(), 'launch.log'), path.join(runtimeDir(), 'aibrowser-crash.log')];
   const tail = [];
   for (const file of files) {
     try {

@@ -524,3 +524,31 @@ verify 新增两项行为断言（后台标签 + 并发截图都必须拿到帧�
 tar -xzOf dist-skill/aibrowser-skill-0.1.0-win32-x64.tar.gz \
   aibrowser/bundle/win32-x64/resources/app.asar | grep -c runExclusive
 ```
+
+## 「双击没反应、启动不了」：单实例锁把无头实例挡住了
+
+单实例闸门（`requestSingleInstanceLock`）是上一轮的修复，但它有个自己挖的坑：
+用户/agent 之前跑过 `pvs serve`（无头），用户再双击 `AIBrowser.exe` 时拿不到锁 → 直接退出，
+**而那个无头实例没有窗口可聚焦** → 用户看到的就是「双击了，什么都没发生」。命令行侧也类似：
+`serve` 遇到「有进程活着但通道没应答」时按设计只回 `starting:true`（45s 内不重复拉起），
+表现也是「起不来」。
+
+改法（`main.js` 的 `singleInstanceReady()`）：
+
+| 拿不到锁时的情况 | 现在的行为 |
+| --- | --- |
+| 本次要面板（无 `--headless`）且已有实例是**无头** | 通过控制通道请它优雅退出（`askShutdown`），然后轮询单实例锁最多 10s 接管，日志打印「已接管：本次以面板模式启动」 |
+| 对方是面板 / 本次也是无头 | 直接退出（`second-instance` 事件会把已有窗口带到前面） |
+| 对方占着锁但完全不应答 | 退出前打印可执行提示：先 `pvs stop`，或结束残留的 AIBrowser.exe；并给出「要并行请设 AIBROWSER_ALLOW_MULTIPLE=1」 |
+
+顺带把 `bindSocket` 里的 shutdown 请求抽成 `control/state.js` 的 `askShutdown()`（接管路径与
+「请无头让位」共用一份实现）。
+
+另外补上一个真空白：**Windows 上拉起器的报错以前被丢掉了**。`launchService` 用
+`Start-Process` 拉起应用时 stdio 全 `ignore`，于是「装了错架构的包（不是有效的 Win32 应用程序）」
+「可执行文件不在」这类失败，外面只看到「起不来」、没有任何原因。现在把 PowerShell 的 stderr
+写进 `<runtimeDir>/launch.log`（用文件而不是管道：不继承调用方句柄，也不会挂住命令），
+`status` 在没起来时会把它的尾巴一起放进 `logTail`。
+
+验收：verify 98/98（新增行为断言：无头在跑时直接启动应用会接管成面板、并保持原实例不被顶掉），
+smoke 18/18。

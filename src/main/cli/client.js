@@ -221,14 +221,36 @@ function launchService({ gui = false, port, identity, logName = gui ? 'gui' : 'd
   // 告诉子进程「你是被拉起来的常驻服务」：它会在启动最早期释放继承来的句柄
   childEnv.AIBROWSER_DETACHED = '1';
 
-  const child = process.platform === 'win32'
-    ? spawn('powershell.exe', [
+  if (process.platform === 'win32') {
+    // 拉起器（PowerShell）的报错不能再丢掉：以前 stdio 全 ignore，于是「Start-Process 失败」
+    // （例如装了错架构的包 → 不是有效的 Win32 应用程序）时外面只看到「起不来」，没有任何原因。
+    // 写文件而不是管道：不继承调用方的句柄，也不会把命令挂住。
+    let errFd = 'ignore';
+    try {
+      const file = path.join(runtimeDir(), 'launch.log');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      errFd = fs.openSync(file, 'a');
+    } catch {
+      /* 打不开就退回丢弃 */
+    }
+    const child = spawn('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
       `Start-Process -FilePath '${ELECTRON_BIN.replace(/'/g, "''")}' `
       + `-ArgumentList ${args.map((a) => `'${String(a).replace(/'/g, "''")}'`).join(', ')} `
       + '-WindowStyle Hidden',
-    ], { detached: true, stdio: 'ignore', windowsHide: true, env: childEnv })
-    : spawn(ELECTRON_BIN, args, { detached: true, stdio: 'ignore', windowsHide: true, env: childEnv });
+    ], { detached: true, stdio: ['ignore', 'ignore', errFd], windowsHide: true, env: childEnv });
+    if (errFd !== 'ignore') {
+      try {
+        fs.closeSync(errFd);
+      } catch {
+        /* ignore */
+      }
+    }
+    child.unref();
+    return { child, args, logFile };
+  }
+
+  const child = spawn(ELECTRON_BIN, args, { detached: true, stdio: 'ignore', windowsHide: true, env: childEnv });
   child.unref();
   return { child, args, logFile };
 }

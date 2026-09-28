@@ -501,28 +501,62 @@ function buildMenu() {
  *
  * 放行的情况：`--smoke-test`（自检要能独立跑）与 `AIBROWSER_ALLOW_MULTIPLE=1`（测试/调试）。
  */
-function singleInstanceReady() {
+const sleepAsync = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** 拿到单实例锁（并挂上「第二个实例 → 把已有窗口带到前面」的处理） */
+function trySingleInstanceLock() {
+  if (!app.requestSingleInstanceLock()) return false;
+  app.on('second-instance', () => {
+    const win = state.window;
+    if (!win || win.isDestroyed()) return;
+    try {
+      win.show();
+      win.focus();
+    } catch {
+      /* 窗口可能正在销毁 */
+    }
+  });
+  return true;
+}
+
+async function singleInstanceReady() {
   if (smokeTest || process.env.AIBROWSER_ALLOW_MULTIPLE === '1') return true;
-  if (app.requestSingleInstanceLock()) {
-    app.on('second-instance', () => {
-      const win = state.window;
-      if (!win || win.isDestroyed()) return;
-      try {
-        win.show();
-        win.focus();
-      } catch {
-        /* 窗口可能正在销毁 */
+  if (trySingleInstanceLock()) return true;
+
+  const { readState, pidAlive, askShutdown } = require('./control/state');
+
+  // 拿不到锁 = 已有实例在运行。分两种情况：
+  //   A) 对方是「无头服务」而这次要开面板（用户双击 AIBrowser.exe / 直接启动）：
+  //      用户期待看到窗口，可无头实例没窗口可聚焦 —— 以前这里直接退出，表现就是
+  //      「双击了没反应，启动不了」。现在先请它优雅退出，再等锁空出来接着启动。
+  //   B) 其它情况（对方有窗口 / 这次也要无头）：直接退出，让对方把窗口带到前面即可。
+  const existing = readState();
+  const alive = Boolean(existing && pidAlive(existing.pid));
+  if (!isHeadless && alive && existing.mode !== 'gui') {
+    logErr(`[aibrowser] 已有无头实例在运行（pid ${existing.pid}）；本次要开面板，先请它退出…\n`);
+    const asked = await askShutdown(undefined, { timeoutMs: 1500 });
+    if (!asked) logErr('[aibrowser] 无头实例没有应答，仍然等它释放单实例锁…\n');
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      await sleepAsync(250);
+      if (trySingleInstanceLock()) {
+        logErr('[aibrowser] 已接管：本次以面板模式启动\n');
+        return true;
       }
-    });
-    return true;
+    }
   }
-  logErr('[aibrowser] 已有实例在运行（单实例），本次启动直接退出；要并行跑请设 AIBROWSER_ALLOW_MULTIPLE=1\n');
+
+  const hint = alive
+    ? `已有实例在运行（单实例 · pid ${existing.pid} · ${existing.mode === 'gui' ? '面板' : '无头'}）：`
+      + '重复启动不会弹新窗口。要开面板先 `pvs stop`，或直接跑 `pvs serve --gui`（它会自动换模式）'
+    : '已有实例占着单实例锁（它已经不响应了）：先 `pvs stop`，或结束残留的 AIBrowser.exe 再启动';
+  logErr(`[aibrowser] ${hint}（要并行跑请设 AIBROWSER_ALLOW_MULTIPLE=1）\n`);
   app.exit(0);
   return false;
 }
 
 async function bootstrap() {
-  if (!singleInstanceReady()) return;
+  if (!(await singleInstanceReady())) return;
   const initialRoot = flags.root ? path.resolve(String(flags.root)) : null;
   if (initialRoot && fs.existsSync(initialRoot)) files.addRoot(initialRoot);
   if (!files.listRoots().length && flags.cwd !== false) {

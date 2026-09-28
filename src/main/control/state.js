@@ -130,36 +130,47 @@ function probe(state, { timeoutMs = 700 } = {}) {
  *   - adopt=true（只有显式 --takeover 才传）→ 先请求对方 shutdown，等它退出后重新绑定
  *   - 占用者无响应 → 删除残留文件后重试绑定（这种情况是残留，不是别人的活服务）
  */
+/**
+ * 请「当前占着控制通道的实例」优雅退出。返回 true = 对方回了 ok，null = 不通/没应答。
+ *
+ * 两个用途：
+ *   1) bindSocket 的接管路径（`--takeover`）；
+ *   2) 应用启动时发现「已有实例占着单实例锁」且本次要开面板、对方却是无头服务 ——
+ *      用户双击/直接启动时就该看到窗口，所以要把无头那个请走（见 main.js singleInstanceReady）。
+ */
+function askShutdown(target = socketPath(), { timeoutMs = 1200 } = {}) {
+  return new Promise((resolve) => {
+    let socket;
+    try {
+      socket = net.connect(target);
+    } catch {
+      resolve(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve(null);
+    }, Math.max(200, timeoutMs));
+    socket.on('connect', () => socket.write(`${JSON.stringify({ id: 'shutdown-ask', action: 'shutdown', params: {} })}\n`));
+    socket.on('data', (chunk) => {
+      if (String(chunk).includes('"ok":true')) {
+        clearTimeout(timer);
+        socket.destroy();
+        resolve(true);
+      }
+    });
+    socket.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
+}
+
 async function bindSocket(onRequest, { reclaim = true, adopt = false } = {}) {
   fs.mkdirSync(runtimeDir(), { recursive: true });
   const target = socketPath();
 
-  const requestShutdown = async () => {
-    try {
-      const result = await new Promise((resolve) => {
-        const socket = net.connect(target);
-        const timer = setTimeout(() => {
-          socket.destroy();
-          resolve(null);
-        }, 900);
-        socket.on('connect', () => socket.write(`${JSON.stringify({ id: 'adopt', action: 'shutdown', params: {} })}\n`));
-        socket.on('data', (chunk) => {
-          if (String(chunk).includes('"ok":true')) {
-            clearTimeout(timer);
-            socket.destroy();
-            resolve(true);
-          }
-        });
-        socket.on('error', () => {
-          clearTimeout(timer);
-          resolve(null);
-        });
-      });
-      return result;
-    } catch {
-      return null;
-    }
-  };
+  const requestShutdown = () => askShutdown(target, { timeoutMs: 900 });
 
   try {
     if (fs.existsSync(target)) {
@@ -229,6 +240,7 @@ async function bindSocket(onRequest, { reclaim = true, adopt = false } = {}) {
 }
 
 module.exports = {
+  askShutdown,
   env,
   runtimeDir,
   statePath,
