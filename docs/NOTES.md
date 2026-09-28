@@ -505,3 +505,22 @@ win32-arm64 包必须是 arm64、win32-x64 包必须是 x64（已实测：arm64 
 一边截另一个会话，全部成功且各自内容正确（两张图字节数不同，没有串台）。
 
 verify 新增两项行为断言（后台标签 + 并发截图都必须拿到帧、且不串台）。
+
+## 「刚打出来的包还是旧代码」：pack-skill 会复用旧 release zip
+
+打包链路是两步：`package.mjs` 产出 `release/*.zip`（应用本体），`pack-skill.mjs` 把它们解包进
+`dist-skill/<平台>/bundle/…` 再压成 tar.gz。第二步里 `ensureReleaseZip()` 看到 zip 已存在就直接用 ——
+于是「改了 src 只跑 pack-skill」时，会打出一批**时间戳是新的、代码是旧的**包。
+今天差点就这么交了一轮（并发截图修复打出来的 6 个包，里面还是修复前的 asar）。
+
+修法：`releaseZipIsStale(zip)` 按 mtime 比较 `release/*.zip` 与 `src/ bin/ preload/ dist/ package.json`
+里最新的文件；旧了就自动重新跑 `package.mjs` 再解包，并打印
+「… 比源码旧（src/dist 有改动），先重新打包，避免把旧代码打进新包」。
+明确想「就用现有 zip」时加 `--from-cache`。
+
+自检一行（打完包后跑，确认新代码真的进去了）：
+
+```bash
+tar -xzOf dist-skill/aibrowser-skill-0.1.0-win32-x64.tar.gz \
+  aibrowser/bundle/win32-x64/resources/app.asar | grep -c runExclusive
+```

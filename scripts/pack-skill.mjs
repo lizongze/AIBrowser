@@ -181,10 +181,61 @@ function forceRemove(target) {
   return !fs.existsSync(target);
 }
 
+/**
+ * release 包是不是比源码旧了？
+ *
+ * 踩过两次：改了 src/ 之后只跑 pack-skill，它看 zip 还在就直接解包 —— 于是「刚打出来的包」里
+ * 跑的还是旧代码（今天的并发截图修复就这样差点白打一轮）。这里按 mtime 判一下，
+ * 旧了就重新打包（`--from-cache` 可以关掉这个行为，明确表示「就用现有 zip」）。
+ */
+function releaseZipIsStale(zip) {
+  let zipTime;
+  try {
+    zipTime = fs.statSync(zip).mtimeMs;
+  } catch {
+    return false;
+  }
+  const EXT = /\.(js|mjs|cjs|css|html|json)$/;
+  let newest = 0;
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (EXT.test(entry.name)) {
+        try {
+          newest = Math.max(newest, fs.statSync(full).mtimeMs);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  };
+  for (const base of ['src', 'bin', 'preload', 'dist']) walk(path.join(root, base));
+  for (const file of ['package.json']) {
+    try {
+      newest = Math.max(newest, fs.statSync(path.join(root, file)).mtimeMs);
+    } catch {
+      /* ignore */
+    }
+  }
+  // 1s 容差：同一秒内落盘很常见
+  return newest > zipTime + 1000;
+}
+
 /** release/AIBrowser-<版本>-<平台>-<架构>.zip 必须已存在（先跑 npm run package） */
 function ensureReleaseZip(platform, arch, fromCache) {
   const zip = path.join(root, 'release', `AIBrowser-${appVersion}-${platform}-${arch}.zip`);
-  if (fs.existsSync(zip)) return zip;
+  if (fs.existsSync(zip)) {
+    if (fromCache || !releaseZipIsStale(zip)) return zip;
+    process.stdout.write(`[skill] ${path.basename(zip)} 比源码旧（src/dist 有改动），先重新打包，避免把旧代码打进新包
+`);
+  }
   if (fromCache) return null;
   process.stdout.write(`[skill] 缺少 ${path.basename(zip)}，先打包 ${platform}-${arch} …\n`);
   try {
