@@ -126,7 +126,8 @@ async function commandOpen(args, flags) {
   const result = await send('open', {
     target,
     force: flags.mode === 'code' ? 'code' : undefined,
-    root: rootDir || undefined,
+    root: resolveRoot(flags), // 上一版这里错写成 batch 里的局部变量 rootDir → ReferenceError
+
     fresh: Boolean(flags.fresh) && !flags.keep,
   }, { state, timeoutMs: 30000 });
   if (flags.json) {

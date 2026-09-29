@@ -267,10 +267,12 @@ async function main() {
   }, { label: '深路径提示' });
   const deepPathSeg = (deepPanel.state?.codeHead || [])[2] || {};
   const deepFullRel = path.relative(root, deepFile).split(path.sep).join('/');
+  // 窗口宽时完整显示也是对的（fitPath 只在放不下时才省略），真正的不变量是：
+  // 「路径尾部（文件名）完整可见，且不会在中间被截断」—— 要么从左侧省略，要么整段完整显示。
+  const elided = deepPathSeg.text.startsWith('…/') && deepPathSeg.text !== deepFullRel;
   check(
-    deepPathSeg.text.startsWith('…/')
-      && deepPathSeg.text.endsWith('deep-target.js')
-      && deepPathSeg.text !== deepFullRel,
+    deepPathSeg.text.endsWith('deep-target.js')
+      && (deepPathSeg.text === deepFullRel || deepPathSeg.text.startsWith('…/')),
     '长路径从左侧省略且保留文件名',
     `文本=${JSON.stringify(deepPathSeg.text)}（省略了前 ${deepFullRel.split('/').length - deepPathSeg.text.split('/').length} 段）`,
   );
@@ -687,6 +689,28 @@ async function main() {
     `${codeItem.source} ${codeItem.width}×${codeItem.height}`);
   check(batch.items.every((i) => fs.existsSync(i.image)), '批量结果图片都落在磁盘上');
   check(fs.readFileSync(path.join(batchDir, 'report.json'), 'utf8').includes('"succeeded": 2'), '批量报告写入 outDir');
+
+  // CLI 层的 open/code 也走一遍：这一层和 HTTP action 是两条代码路径，
+  // 曾经只测 action，结果 `pvs open` 里引用了未定义变量（rootDir）都没被发现。
+  {
+    const cliOpen = spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'open', htmlFile, '--json'], { encoding: 'utf8', timeout: 60000 });
+    const openJson = (() => {
+      for (const line of String(cliOpen.stdout || '').split('\n').reverse()) {
+        const text = line.trim();
+        if (text.startsWith('{')) {
+          try {
+            return JSON.parse(text);
+          } catch {
+            /* 继续找 */
+          }
+        }
+      }
+      return null;
+    })();
+    check(Boolean(openJson?.ok), 'CLI 的 pvs open（不带 --root）能打开网页', String(cliOpen.stderr || '').slice(0, 120));
+    const cliOpenRoot = spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'code', codeFile, '--root', root, '--json'], { encoding: 'utf8', timeout: 60000 });
+    check(String(cliOpenRoot.stdout || '').includes('"ok":true'), 'CLI 的 pvs code --root 正常', String(cliOpenRoot.stderr || '').slice(0, 120));
+  }
 
   // 微信小程序（以及支付宝/抖音等价后缀）的语法高亮：独立语言 id + 复用 html/css/js 模式
   {

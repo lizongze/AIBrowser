@@ -198,6 +198,12 @@ function addressValue(session) {
 function fitPath(node, full) {
   const parts = String(full).split('/').filter(Boolean);
   node.textContent = full;
+  // 还没布局（clientWidth/scrollWidth 都是 0）时量不出宽度：等下一帧再量一次，
+  // 否则长路径会原样留着不省略（验收里「长路径从左侧省略」就是这么偶发失败的）
+  if (!node.clientWidth && !node.scrollWidth) {
+    requestAnimationFrame(() => fitPath(node, full));
+    return;
+  }
   let dropped = 0;
   while (parts.length - dropped > 1 && node.scrollWidth > node.clientWidth + 1) {
     dropped += 1;
