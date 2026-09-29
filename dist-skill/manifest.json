@@ -2,7 +2,7 @@
   "name": "aibrowser-skill",
   "version": "0.1.0",
   "electron": "38.8.6",
-  "generatedAt": "2026-09-28T09:53:41.740Z",
+  "generatedAt": "2026-09-29T01:33:26.024Z",
   "host": "linux-x64",
   "packages": [
     {
@@ -10,9 +10,9 @@
       "arch": "arm64",
       "ok": true,
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-darwin-arm64.tar.gz",
-      "archiveBytes": 187718393,
-      "sha256": "a32ffcb06363e36474c74482a3ec8266a2821725d096a9a8177e7fc642e11205",
-      "builtAt": "2026-09-28T09:53:41.720Z",
+      "archiveBytes": 187725676,
+      "sha256": "fe15f1d6e6fb0f27142649e8e0b3a3e0cc1aa5588fa7df568d2684980998382f",
+      "builtAt": "2026-09-29T01:27:25.837Z",
       "version": "0.1.0",
       "electron": "38.8.6",
       "bundlePlatforms": [
@@ -25,9 +25,9 @@
       "arch": "x64",
       "ok": true,
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-darwin-x64.tar.gz",
-      "archiveBytes": 202360113,
-      "sha256": "bb0809d7f337cbb44175999df3258110cb04515d83748706ddec6c2e2669d2f7",
-      "builtAt": "2026-09-28T09:53:19.342Z",
+      "archiveBytes": 202356040,
+      "sha256": "3bd330731ac1546974d0b4355a16c7784cc87cbcb1e3b50b38ba8a411e950420",
+      "builtAt": "2026-09-29T01:27:04.270Z",
       "version": "0.1.0",
       "electron": "38.8.6",
       "bundlePlatforms": [
@@ -40,9 +40,9 @@
       "arch": "x64",
       "ok": true,
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-linux-x64.tar.gz",
-      "archiveBytes": 116351617,
-      "sha256": "e8dccfb890fc4153cfe5db0aab9a663c8b3a6d5d8edb596ce69260ef409a3b55",
-      "builtAt": "2026-09-28T09:51:57.495Z",
+      "archiveBytes": 116353127,
+      "sha256": "fab3ae3edd490d5f23b2edf2a67c9ceff17fb83f398ba28d88cf909afaf09691",
+      "builtAt": "2026-09-29T01:33:26.006Z",
       "version": "0.1.0",
       "electron": "38.8.6",
       "bundlePlatforms": [
@@ -55,9 +55,9 @@
       "arch": "arm64",
       "ok": true,
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-linux-arm64.tar.gz",
-      "archiveBytes": 116352424,
-      "sha256": "fb992057d7e0a16b65f940646383640df675427e15d8b5a68113a3e1a03777b8",
-      "builtAt": "2026-09-28T09:52:14.292Z",
+      "archiveBytes": 116351092,
+      "sha256": "d065db1be1bebdad8525f6fa8086f9f84b4af92ee8fef604ea49ac3b4593af96",
+      "builtAt": "2026-09-29T01:26:07.940Z",
       "version": "0.1.0",
       "electron": "38.8.6",
       "bundlePlatforms": [
@@ -70,9 +70,9 @@
       "arch": "x64",
       "ok": true,
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-win32-x64.tar.gz",
-      "archiveBytes": 138267186,
-      "sha256": "62d8d14a2ad15c3c246af4aec2f04382e8e55b17858a19c78358896ea1604f8f",
-      "builtAt": "2026-09-28T09:52:36.264Z",
+      "archiveBytes": 138279017,
+      "sha256": "141d5c9aec0328e68a0c97ddf28406ebd941381d3c874f14a879a4b0bbcac1d3",
+      "builtAt": "2026-09-29T01:33:11.589Z",
       "version": "0.1.0",
       "electron": "38.8.6",
       "bundlePlatforms": [
@@ -85,9 +85,9 @@
       "arch": "arm64",
       "ok": true,
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-win32-arm64.tar.gz",
-      "archiveBytes": 137590660,
-      "sha256": "466972b041d08332105dd1ff2a986fda1eed58652bf24f8e4b7fd511f8dda963",
-      "builtAt": "2026-09-28T09:52:54.946Z",
+      "archiveBytes": 137595627,
+      "sha256": "ba1dc87ef17474a99b57c2bb04fcb38319e76e24bfec8bb633443f97becf6299",
+      "builtAt": "2026-09-29T01:26:40.859Z",
       "version": "0.1.0",
       "electron": "38.8.6",
       "bundlePlatforms": [
@@ -99,48 +99,48 @@
   "pick": {
     "darwin-arm64": {
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-darwin-arm64.tar.gz",
-      "sha256": "a32ffcb06363e36474c74482a3ec8266a2821725d096a9a8177e7fc642e11205",
-      "bytes": 187718393,
+      "sha256": "fe15f1d6e6fb0f27142649e8e0b3a3e0cc1aa5588fa7df568d2684980998382f",
+      "bytes": 187725676,
       "bundlePlatforms": [
         "darwin-arm64"
       ]
     },
     "darwin-x64": {
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-darwin-x64.tar.gz",
-      "sha256": "bb0809d7f337cbb44175999df3258110cb04515d83748706ddec6c2e2669d2f7",
-      "bytes": 202360113,
+      "sha256": "3bd330731ac1546974d0b4355a16c7784cc87cbcb1e3b50b38ba8a411e950420",
+      "bytes": 202356040,
       "bundlePlatforms": [
         "darwin-x64"
       ]
     },
     "linux-x64": {
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-linux-x64.tar.gz",
-      "sha256": "e8dccfb890fc4153cfe5db0aab9a663c8b3a6d5d8edb596ce69260ef409a3b55",
-      "bytes": 116351617,
+      "sha256": "fab3ae3edd490d5f23b2edf2a67c9ceff17fb83f398ba28d88cf909afaf09691",
+      "bytes": 116353127,
       "bundlePlatforms": [
         "linux-x64"
       ]
     },
     "linux-arm64": {
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-linux-arm64.tar.gz",
-      "sha256": "fb992057d7e0a16b65f940646383640df675427e15d8b5a68113a3e1a03777b8",
-      "bytes": 116352424,
+      "sha256": "d065db1be1bebdad8525f6fa8086f9f84b4af92ee8fef604ea49ac3b4593af96",
+      "bytes": 116351092,
       "bundlePlatforms": [
         "linux-arm64"
       ]
     },
     "win32-x64": {
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-win32-x64.tar.gz",
-      "sha256": "62d8d14a2ad15c3c246af4aec2f04382e8e55b17858a19c78358896ea1604f8f",
-      "bytes": 138267186,
+      "sha256": "141d5c9aec0328e68a0c97ddf28406ebd941381d3c874f14a879a4b0bbcac1d3",
+      "bytes": 138279017,
       "bundlePlatforms": [
         "win32-x64"
       ]
     },
     "win32-arm64": {
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-win32-arm64.tar.gz",
-      "sha256": "466972b041d08332105dd1ff2a986fda1eed58652bf24f8e4b7fd511f8dda963",
-      "bytes": 137590660,
+      "sha256": "ba1dc87ef17474a99b57c2bb04fcb38319e76e24bfec8bb633443f97becf6299",
+      "bytes": 137595627,
       "bundlePlatforms": [
         "win32-arm64"
       ]
