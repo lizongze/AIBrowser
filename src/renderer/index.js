@@ -469,7 +469,12 @@ function jumpEditorToLine(sessionId, line, column) {
     const info = view.state.doc.line(wanted);
     const offset = Math.max(0, Number(column || 1) - 1);
     const pos = info.from + Math.min(offset, info.length);
-    view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+    // 目标行**居中**显示（编辑器里「跳到某行」的常规做法）：顶到最上面的话，
+    // 上下文全在屏幕下方，不方便看这一行的前后文。
+    view.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    });
     view.focus();
     state.lastJumpKey = key;
     return true;

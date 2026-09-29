@@ -373,6 +373,9 @@ async function runBatch(opts) {
         height: images[0].height,
         bytes: images[0].bytes,
         fullPage: wantFullPage,
+        // 该项定位到的行/列（清单里写了 line/column 时）：报告里能直接核对跳没跳
+        line: session.line ?? null,
+        column: session.column ?? null,
         elapsedMs: Date.now() - itemStarted,
         consoleErrors,
         ...(content === null ? {} : { content }),

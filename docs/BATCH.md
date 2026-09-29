@@ -22,6 +22,15 @@ pvs batch https://a.com https://b.com ./page.html
 # 2) 从文件读（.json / .txt / .csv，每行一个；# 开头为注释）
 pvs batch --from urls.txt
 pvs batch --root /path/to/project src/a.vue src/b.vue   # 整批指定授权根目录（相对路径按它解析）
+
+# 清单里每项还能指定 root / line / column（打开后跳到该行，适合「批量截某文件第 N 行」）
+cat > items.json <<'JSON'
+[
+  { "file": "src/app.vue", "root": "/path/to/project", "line": 42, "name": "app-L42" },
+  { "file": "src/store/index.js", "root": "/path/to/project", "line": 120, "column": 5 }
+]
+JSON
+pvs batch --from-json items.json --out ./shots --json
 pvs batch --from items.json
 
 # 3) 给目录：递归收集其中的 HTML 文件

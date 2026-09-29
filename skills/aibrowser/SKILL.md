@@ -292,6 +292,9 @@ $P batch --dir ./site --ext html                   # 收集目录下的 HTML
 $P batch src/views/a.vue src/views/b.vue --root /path/to/project --out ./shots --json
 ```
 
+清单里的每一项都可以写 `root`（该项的授权根目录）与 `line` / `column`（打开后跳到第几行第几列，
+截「某文件第 N 行」很方便）；报告里每项也会回传实际定位到的 `line` / `column`。
+
 `--root` 对整批生效：条目里的**相对路径按它解析**（`--from` / `--dir` 给的相对路径也是），
 并它被登记成「用户选的根目录」——所以截图后地址栏显示的是**相对该 root** 的路径，
 文件也不受「路径不在已授权目录内」限制。
@@ -302,7 +305,8 @@ $P batch src/views/a.vue src/views/b.vue --root /path/to/project --out ./shots -
 [
   "https://example.com/",
   { "file": "./index.html", "name": "home", "fullPage": true, "content": "#main" },
-  { "url": "https://example.com/docs", "waitFor": "#content", "waitMs": 500 }
+  { "url": "https://example.com/docs", "waitFor": "#content", "waitMs": 500 },
+  { "file": "src/app.vue", "root": "/path/to/project", "line": 42, "name": "app-L42" }
 ]
 ```
 

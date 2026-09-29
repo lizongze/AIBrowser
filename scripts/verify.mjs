@@ -735,6 +735,18 @@ async function main() {
       'pvs code <file>:<line>：复用已打开的会话也会跳过去',
       `cursor=${st2.state?.cmCursorLine} 期望=${target2}`);
 
+    // batch 清单里每项也能带 line/column：报告里要回传，面板也要跳过去
+    const batchLine = await api('batch', {
+      items: [{ file: bigFile, root, line: 6, column: 2, name: 'line6' }],
+      outDir: path.join(root, '.aibrowser', 'verify-line'),
+      fullPage: true,
+    });
+    await sleep(900);
+    const st4 = await api('panelState');
+    check(batchLine.items?.[0]?.line === 6 && Number(st4.state?.cmCursorLine) === 6,
+      'batch 清单项支持 line/column（并回传实际定位行）',
+      `报告 line=${batchLine.items?.[0]?.line} 光标=${st4.state?.cmCursorLine}`);
+
     // HTTP 动作同样支持
     const viaApi = await api('openCode', { file: bigFile, line: 4 });
     await sleep(1000);
