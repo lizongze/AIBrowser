@@ -216,7 +216,9 @@ function releaseZipIsStale(zip) {
       }
     }
   };
-  for (const base of ['src', 'bin', 'preload', 'dist']) walk(path.join(root, base));
+  // 只看源码与入口：不比对 dist/（它是 build.mjs 的产物，每次构建都会刷新 mtime，
+  // 放进来会让「刚构建过」被误判成「zip 比源码旧」，于是每次打包都白重打一遍全部平台）
+  for (const base of ['src', 'bin', 'preload']) walk(path.join(root, base));
   for (const file of ['package.json']) {
     try {
       newest = Math.max(newest, fs.statSync(path.join(root, file)).mtimeMs);
