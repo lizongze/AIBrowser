@@ -60,7 +60,7 @@ curl -s "http://127.0.0.1:$PORT/screenshot?token=$TOKEN&fullPage=true" -o page.p
 | `tree` | `dir`、`includeIgnored`（默认忽略 node_modules/.git 等） | `{dir,entries:[{name,path,dir,size,isPreview,hidden}]}` |
 | `roots` | `root` | `{roots:[{id,dir}]}` |
 | `ui` | `view:'code'\|'web'\|'console'` | `{view}`（有面板时切视图） |
-| `batch` | `items`、`outDir`、`fullPage`、`timeout`、`format` | `{total,succeeded,failed,items:[{index,target,name,ok,image,images,width,height,bytes,source,sessionId}]}`；串行逐项切成活动标签，`source=panel` 表示该项截的是整块面板 |
+| `batch` | `items`、`outDir`、`fullPage`、`timeout`、`format`、**`root`**（整批授权根：条目里相对路径按它解析，并登记成用户选的根目录，所以地址栏按它显示相对路径） | `{total,succeeded,failed,items:[{index,target,name,ok,image,images,width,height,bytes,source,sessionId}]}`；串行逐项切成活动标签，`source=panel` 表示该项截的是整块面板 |
 | `debugWatch` | `sessionId` | `{enabled,entry,files,pageAssets,extraFiles,intervalMs,extensions}`：热重载当前关注哪些文件 |
 | `packages` | `target`（`linux`/`win32`/`darwin`，别名 `windows`/`mac`）、`arch`（`x64`/`arm64`） | `{ok,manifest,version,electron,generatedAt,artifacts:[…],picked}`：按平台挑打包产物（zip 路径 / 解压后的可执行文件 / sha256 / 注意事项）；没有产物时 `error` 里给出生成命令 |
 | `shutdown` | — | 关闭该实例 |

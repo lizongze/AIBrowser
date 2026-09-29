@@ -30,7 +30,8 @@
     "smoke": "npm run build && electron . --smoke-test --headless",
     "start": "npm run build && electron .",
     "verify": "npm run build && node scripts/verify.mjs",
-    "watch": "node scripts/build.mjs --watch"
+    "watch": "node scripts/build.mjs --watch",
+    "test:root": "node skills/aibrowser/tests/root-cases.js"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.8.0",

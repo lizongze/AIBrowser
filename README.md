@@ -136,6 +136,14 @@ bash ~/.agents/skills/aibrowser/scripts/pvs.sh status --json   # 验证（不起
 脚本会优先用它（`bundle/<平台>-<架构>/`），找不到才回退到 `$PVS_HOME`（开发）或 `PATH` 里的 `pvs`。
 自带平台与 sha256 见包内 `bundle/manifest.json`，用法见包内 `BUNDLE.md`。
 
+## 自检路径显示（--root）
+
+```bash
+npm run test:root        # 16 条用例：声明 root / 已记录的根 / 没有 root / batch 逐项 root 等
+```
+
+规则：打开时声明过 root → 相对该 root 显示；没声明但在已记录的根里 → 相对最具体的那个；都没有 → 绝对路径。
+
 ## 快速开始
 
 ```bash

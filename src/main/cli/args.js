@@ -22,7 +22,7 @@ const BOOLEAN_FLAGS = new Set([
 ]);
 
 const VALUE_FLAGS = new Set([
-  'from', 'dir', 'ext', 'format',
+  'from', 'from-json', 'dir', 'ext', 'format',
   'scale-factor',
   'out', 'format', 'quality', 'selector', 'session', 'root', 'port', 'line', 'column', 'timeout', 'mode', 'file', 'url', 'base64', 'input', 'identity', 'target', 'platform', 'arch', 'wait-ms',
 ]);

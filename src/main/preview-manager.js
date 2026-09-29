@@ -6,6 +6,28 @@ const { PreviewSession, cleanUrl, isLocalTarget } = require('./preview-session')
 const { detectLanguage, isWebPreviewable } = require('./language');
 const { normalizePath } = require('./file-service');
 
+/**
+ * `file://` URL → 本机路径（拿不到就返回 null）。
+ *
+ * 为什么要它：agent 常常把本地页面写成 `file:///D:/proj/index.html` 这种 URL 形式。
+ * 以前这种目标一律走「URL 会话」，会话里没有 file 字段 —— 地址栏只能显示整条 URL
+ * （还被百分号编码），带 `--root` 也显示不出相对路径，代码预览/授权也都不生效。
+ * 现在只要能落到本机文件上，就按本地文件处理。
+ */
+function localPathFromFileUrl(raw) {
+  if (!/^file:\/\//i.test(String(raw))) return null;
+  try {
+    const url = new URL(String(raw));
+    if (url.hostname && url.hostname !== 'localhost') return null; // 网络共享之类不处理
+    let p = decodeURIComponent(url.pathname || '');
+    // Windows 形态：file:///D:/x 的 pathname 是 /D:/x，去掉开头那个斜杠
+    if (/^\/[a-zA-Z]:[\\/]/.test(p)) p = p.slice(1);
+    return p || null;
+  } catch {
+    return null;
+  }
+}
+
 class PreviewManager {
   /**
    * @param {object} deps
@@ -165,6 +187,9 @@ class PreviewManager {
     const existing = sessionId ? this.sessions.get(sessionId) : null;
     const session = existing || this.create();
     if (existing) this.setFocus(existing.id);
+    // 声明的 root 要在广播之前落到会话上：否则界面先收到旧快照（还带着上一次的 root），
+    // 地址栏就会按上一个 root 显示（复用同一个会话时尤其明显）
+    session.declaredRoot = root ? path.resolve(normalizePath(String(root))) : session.declaredRoot || null;
     await session.load(target);
     if (focus) this.setFocus(session.id);
     this.deps.broadcast('sessions:updated', { sessions: this.list() });
@@ -193,6 +218,8 @@ class PreviewManager {
     session.line = line;
     session.column = column;
     session.url = `code://${abs}`;
+    // 同 open()：声明过的 root 要在广播之前生效
+    session.declaredRoot = root ? path.resolve(normalizePath(String(root))) : session.declaredRoot || null;
     if (focus) this.setFocus(session.id);
     this.deps.broadcast('sessions:updated', { sessions: this.list() });
     this.deps.broadcast('ui:open', { sessionId: session.id, view: 'code', file: abs, line, column });
@@ -328,7 +355,9 @@ class PreviewManager {
     const looksLikeUrlText = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || /^about:/i.test(raw);
     // 注意：非 WSL 平台 normalizePath 是对同一路径取“规范形式”（非 no-op），
     // Windows 上也会得到稳定形式（如 D:\gitData\...），比原始输入更可靠。
-    const candidate = normalizePath(raw);
+    // file:// URL 先还原成本机路径：这样「带 --root 打开本地页面」才显示得出相对路径，
+    // 也才能按代码/网页类型正常预览（否则它只是个 URL 会话，file 字段为空）
+    const candidate = normalizePath(localPathFromFileUrl(raw) || raw);
     let abs = path.isAbsolute(candidate) ? candidate : path.resolve(candidate);
     let exists = fs.existsSync(abs);
     // 相对路径再按「已记录的根目录」找一遍：
@@ -355,8 +384,13 @@ class PreviewManager {
       }
       const wantWeb = force === 'web' || (force !== 'code' && isWebPreviewable(file));
       const session = wantWeb
-        ? await this.open({ file, focus })
-        : await this.openCode({ file, focus });
+        ? await this.open({ file, root, focus })
+        : await this.openCode({ file, root, focus });
+      // 声明过的 root 已由 open()/openCode() 在广播前写入 session.declaredRoot；
+      // 这里只兜底（万一走了别的路径创建会话）
+      if (root && !session.declaredRoot) {
+        session.declaredRoot = path.resolve(normalizePath(String(root)));
+      }
       return { kind: wantWeb ? 'web' : 'code', session, language: session.language || null };
     }
 

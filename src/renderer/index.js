@@ -149,9 +149,15 @@ function rootRelative(file, { explicitOnly = false } = {}) {
   return { dir, relative: target.slice(dir.length + 1) };
 }
 
-function displayPath(file) {
+function displayPath(file, declaredRoot) {
   const target = String(file || '');
   if (!target) return '';
+  // 调用方声明过 root 就以它为基准（会话上带着 declaredRoot）
+  const declared = declaredRoot ? String(declaredRoot).replace(/[\\/]+$/, '') : '';
+  if (declared && (target === declared || target.startsWith(declared + '/') || target.startsWith(declared + '\\'))) {
+    const relative = target.slice(declared.length + 1);
+    if (relative.includes('/') || relative.includes('\\')) return relative;
+  }
   const hit = rootRelative(target);
   // 只有带目录层级的相对路径才有信息量（和被显示的文件名不重复）
   if (hit && (hit.relative.includes('/') || hit.relative.includes('\\'))) return hit.relative;
@@ -172,6 +178,13 @@ function addressValue(session) {
   if (!session) return '';
   const raw = session.file || session.url || '';
   if (!session.file) return raw || ''; // 纯 URL 会话：地址栏就是那个 URL
+  // 会话声明过 root（本次 open 带了 --root / 清单里写了 root）→ 以它为基准；
+  // 否则退回「已记录的根里最具体的那个」。
+  const declared = session.rootDir ? String(session.rootDir).replace(/[\\/]+$/, '') : '';
+  const target = String(session.file);
+  if (declared && (target === declared || target.startsWith(declared + '/') || target.startsWith(declared + '\\'))) {
+    return target.slice(declared.length + 1);
+  }
   const hit = rootRelative(session.file, { explicitOnly: true });
   // 地址栏比代码区头部更进一步：文件正好在根目录下（相对路径没有目录层级）也显示相对路径，
   // 用户要的就是「看到它相对 root 的位置」。
@@ -256,6 +269,10 @@ async function loadLanguage(id) {
     try {
       const direct = LANG_LOADERS[id];
       if (direct) return await direct();
+      // 小程序文件：复用最接近的模式（页面≈HTML、样式≈CSS、脚本≈JS）
+      if (id === 'wxml' || id === 'axml' || id === 'ttml') return await LANG_LOADERS.html();
+      if (id === 'wxss' || id === 'acss') return await LANG_LOADERS.css();
+      if (id === 'wxs' || id === 'sjs') return await LANG_LOADERS.javascript();
       switch (id) {
         case 'shell': {
           const { shell } = await import('@codemirror/legacy-modes/mode/shell');
@@ -445,7 +462,7 @@ async function renderCode(session) {
     state.treeSelected = file;
     el.codeName.textContent = basename(file);
     el.codePath.title = file;
-    fitPath(el.codePath, displayPath(file));
+    fitPath(el.codePath, displayPath(file, session.rootDir));
     let payload;
     try {
       payload = await Promise.race([
@@ -1444,7 +1461,7 @@ function wireEventsFromMain() {
     if (state.treeRootDir && !state.roots.some((item) => item.dir === state.treeRootDir)) state.treeRootDir = null;
     if (state.activeFile) {
       el.codePath.title = state.activeFile;
-      fitPath(el.codePath, displayPath(state.activeFile));
+      fitPath(el.codePath, displayPath(state.activeFile, sessionById(state.activeId)?.rootDir));
     }
     renderRoots();
     state.treeCache.clear();
@@ -1573,6 +1590,19 @@ window.__PVS_ACTION__ = (action, payload = {}) => {
     case 'hot-reload': setHotReload(payload.enabled, { notify: payload.notify !== false }); return { hotReload: state.hotReload };
     case 'content-only': toggleContentOnly(payload.visible); return { contentOnly: state.contentOnly };
     case 'ui-zoom': applyUiScale(payload.factor, { persist: false }); return { uiScale: state.uiScale };
+    case 'tokens': {
+      // 语法高亮的「看得见」证据：把编辑器里前若干个 token 的类名与颜色报出来。
+      // 验收小程序（wxml/wxss/wxs）这类复用模式的高亮时，比截图更直接。
+      const spans = [...document.querySelectorAll('#editor .cm-line span')].slice(0, 400);
+      const colors = [];
+      const sample = [];
+      for (const node of spans) {
+        const color = getComputedStyle(node).color;
+        if (!colors.includes(color)) colors.push(color);
+        if (sample.length < 12) sample.push({ text: node.textContent.slice(0, 24), color });
+      }
+      return { count: spans.length, colors, sample };
+    }
     case 'font-report': {
       // 报告各区域实际使用的字体与字号（便于确认字体栈是否命中）
       const pick = (sel) => {

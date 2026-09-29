@@ -1052,6 +1052,10 @@ class PreviewSession {
       sessionId: this.id,
       kind: this.kind,
       title: this.title,
+      // 本次打开时**声明**的根目录（--root / 清单里每项的 root）。
+      // 界面用它来显示「相对该 root」的路径：一个会话可能落在多个已记录的根里，
+      // 只有调用方声明的那一个才是他要看的基准。
+      rootDir: this.declaredRoot || null,
       url: this.file ? this.url : (wc ? wc.getURL() : this.url) || this.url,
       file: this.file,
       language: this.file ? detectLanguage(this.file).id : null,

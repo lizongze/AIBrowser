@@ -287,7 +287,14 @@ AI 手上有**文件列表 / URL 列表**时，不要循环调 N 次命令 —�
 $P batch --from list.json --out ./shots --json     # 从清单文件
 $P batch https://a.com https://b.com ./page.html   # 直接给多个目标
 $P batch --dir ./site --ext html                   # 收集目录下的 HTML
+
+# --root：整批的授权根目录（工作目录不在项目里时尤其有用）
+$P batch src/views/a.vue src/views/b.vue --root /path/to/project --out ./shots --json
 ```
+
+`--root` 对整批生效：条目里的**相对路径按它解析**（`--from` / `--dir` 给的相对路径也是），
+并它被登记成「用户选的根目录」——所以截图后地址栏显示的是**相对该 root** 的路径，
+文件也不受「路径不在已授权目录内」限制。
 
 `list.json` 支持字符串或对象（每项可覆盖选项）：
 
@@ -451,6 +458,31 @@ $P packages --target win32 --json      # 让 AI 直接拿到该平台的 zip 路
    ```
 
 3. **不要用 `shot` 判断页面是否加载完**：截图会等页面首帧，但数据抓取要自己轮询条件。
+
+## 自检：路径与 `--root` 的显示规则（一条命令）
+
+路径显示的规则只有三条，但组合起来容易踩坑，所以带了一份自检脚本：
+
+| 规则 | 表现 |
+| --- | --- |
+| 打开时**声明过 root**（`--root` / 清单里每项的 `root`） | 地址栏显示**相对该 root** 的路径（代码区头部同理） |
+| 没声明 root，但文件在**已记录的根**里（同一服务里 root 会累积） | 相对**最具体**的那个根显示 |
+| 都没有 | 显示**绝对路径**（地址栏悬停的 title 始终是绝对路径） |
+
+```bash
+node <skill>/tests/root-cases.js        # 仓库里： npm run test:root
+```
+
+Windows 打包版（不需要装 node，用自带应用跑）：
+
+```powershell
+$B = "$env:USERPROFILE\.agents\skills\aibrowser\bundle\win32-x64"
+$env:ELECTRON_RUN_AS_NODE = "1"
+& "$B\AIBrowser.exe" "$B\resources\app.asar\tests\root-cases.js"
+```
+
+脚本会在临时目录里造测试项目，逐条打印「命令、此刻已记录的根、期望值、实际值」，
+最后给出 `n/16 通过`。跑完可以对照每条的期望值检查是不是你要的行为。
 
 ## 错误码与处置
 

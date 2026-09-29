@@ -157,7 +157,18 @@ async function runBatch(opts) {
     timeout = DEFAULT_TIMEOUT,
     onEvent,
     manager,
+    // 整批的授权根目录（CLI 的 `pvs batch --root <dir>`）：
+    //   - 传给每一项当默认 root，相对路径按它解析；
+    //   - 显式声明为「用户选的目录」（非 auto），这样地址栏会按它显示相对路径。
+    root: batchRoot,
   } = opts;
+  // 同样要过 normalizePath：客户端可能直接给 Windows 形态（D:\…），
+  // 在 WSL 下 path.resolve 会把它拼坏（/tmp/D:\…）
+  const defaultRoot = batchRoot ? path.resolve(normalizePath(String(batchRoot))) : null;
+  if (defaultRoot) {
+    if (!fs.existsSync(defaultRoot)) throw new Error(`--root 目录不存在：${defaultRoot}`);
+    manager.files.addRoot(defaultRoot); // 显式记录（非 auto）
+  }
 
   const outAbsolute = path.resolve(outDir);
   await fsp.mkdir(outAbsolute, { recursive: true });
@@ -201,6 +212,40 @@ async function runBatch(opts) {
     let session = null;
     let consoleBefore = 0;
     try {
+      // ---- root 解析顺序（每一项都走一遍）----
+      //   1) 条目自己带的 root（JSON 清单里逐项指定，`--from-json`）
+      //   2) 整批的 --root
+      //   3) 都没有时，才按文件位置推导一个 auto 根
+      // 显式指定的 root 会登记成「用户选的目录」（非 auto、非隐式），
+      // 这样地址栏才会显示「相对该 root」的路径。
+      const itemRoot = item.root
+        ? path.resolve(normalizePath(String(item.root)))
+        : defaultRoot;
+      if (itemRoot) {
+        item.root = itemRoot;
+        manager.files.addRoot(itemRoot, { auto: Boolean(item.autoRoot) });
+        // 相对路径按「该项自己的 root → 整批 --root」依次试，找到就换成绝对路径，
+        // 交给 openSmart 时就不会因为找不到而报「路径不存在」。
+        if (item.file && !path.isAbsolute(String(item.file))) {
+          for (const base of [itemRoot, defaultRoot].filter(Boolean)) {
+            const candidate = path.join(base, String(item.file));
+            if (fs.existsSync(candidate)) {
+              item.file = candidate;
+              if (item.target === undefined) item.target = candidate;
+              break;
+            }
+          }
+        }
+        if (item.target && !path.isAbsolute(String(item.target)) && !/^[a-z][a-z0-9+.-]*:/i.test(String(item.target))) {
+          for (const base of [itemRoot, defaultRoot].filter(Boolean)) {
+            const candidate = path.join(base, String(item.target));
+            if (fs.existsSync(candidate)) {
+              item.target = candidate;
+              break;
+            }
+          }
+        }
+      }
       // 本地文件：缺省用其父目录作为授权根目录
       if (item.file && !item.root) {
         const absFile = path.resolve(item.file);
@@ -208,8 +253,8 @@ async function runBatch(opts) {
         item.root = fs.statSync(absFile).isDirectory() ? absFile : path.dirname(absFile);
         item.autoRoot = true; // 由文件位置推导，不是用户选的目录
       }
-      // 用户显式写的 root 算「声明」；下面按文件位置推导出来的只能算 auto
-      if (item.root) manager.files.addRoot(item.root, { auto: Boolean(item.autoRoot) });
+      // 推导出来的 root 只能算 auto（用户显式写的已经在上面登记过）
+      if (item.root && item.autoRoot) manager.files.addRoot(item.root, { auto: true });
 
       session = item.sessionId ? manager.get(item.sessionId) : null;
       if (!session) {

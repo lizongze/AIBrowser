@@ -23,6 +23,8 @@ const EXTENSION_GROUPS = [
     name: '页面与模板',
     exts: [
       'html', 'htm', 'xhtml', 'shtml',
+      // 小程序页面/样式/脚本（微信 wxml/wxss/wxs，另外两家生态的等价后缀一并认）
+      'wxml', 'wxss', 'wxs', 'axml', 'acss', 'ttml', 'ttss',
       'hbs', 'handlebars', 'mustache', 'ejs', 'pug', 'jade', 'njk', 'nunjucks', 'liquid', 'twig', 'erb', 'haml', 'slim',
     ],
   },

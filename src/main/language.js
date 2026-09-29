@@ -7,6 +7,16 @@ const LANGUAGES = [
   ['typescript', ['ts', 'mts', 'cts', 'tsx'], 'TypeScript'],
   ['json', ['json', 'jsonc', 'json5', 'webmanifest', 'map'], 'JSON'],
   ['css', ['css', 'scss', 'sass', 'less'], 'CSS'],
+  // 微信小程序：wxml 是「HTML + mustache 数据绑定」，wxss 是「CSS + rpx 单位」，wxs 是小程序内的 JS 子集。
+  // 各自给一个独立的语言 id（标签能直接看出是小程序文件），高亮复用 html / css / javascript 模式。
+  ['wxml', ['wxml'], 'WXML'],
+  ['wxss', ['wxss'], 'WXSS'],
+  ['wxs', ['wxs'], 'WXS'],
+  // 另外两家小程序生态的等价后缀（支付宝 axml/acss/sjs、抖音 ttml/ttss），高亮同样复用 html/css/js
+  ['axml', ['axml'], 'AXML'],
+  ['acss', ['acss', 'ttss'], 'ACSS'],
+  ['ttml', ['ttml'], 'TTML'],
+  ['sjs', ['sjs'], 'SJS'],
   ['markdown', ['md', 'markdown', 'mdx'], 'Markdown'],
   ['python', ['py', 'pyw', 'pyi'], 'Python'],
   ['rust', ['rs'], 'Rust'],

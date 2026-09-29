@@ -100,6 +100,22 @@ function errorMessage(err) {
 
 // ---------- 命令实现 ----------
 
+/**
+ * 用户给的 --root 归一化。
+ * 必须走 normalizePath：Windows 形态的 `D:\…` 在 WSL 下直接 path.resolve 会拼成
+ * `/tmp/D:\…`（错），而 normalizePath 会转成 `/mnt/d/…`；原生 Windows 上则保持不变。
+ */
+function resolveRoot(flags) {
+  if (!flags.root) return undefined;
+  const resolved = path.resolve(normalizePath(String(flags.root)));
+  // 明确校验：root 拼错时如果静默接受，界面上只会表现为「地址栏变成绝对路径」，
+  // 排查起来很绕 —— 直接给出可读的错误更有用（batch 里也是同样的检查）。
+  if (!fs.existsSync(resolved)) {
+    throw Object.assign(new Error(`--root 目录不存在：${resolved}（原始值 ${flags.root}）`), { code: 'ENOENT' });
+  }
+  return resolved;
+}
+
 async function commandOpen(args, flags) {
   const raw = args[0];
   if (!raw) throw Object.assign(new Error('用法：pvs open <file|url|target>'), { code: 'EUSAGE' });
@@ -110,7 +126,7 @@ async function commandOpen(args, flags) {
   const result = await send('open', {
     target,
     force: flags.mode === 'code' ? 'code' : undefined,
-    root: flags.root ? path.resolve(String(flags.root)) : undefined,
+    root: rootDir || undefined,
     fresh: Boolean(flags.fresh) && !flags.keep,
   }, { state, timeoutMs: 30000 });
   if (flags.json) {
@@ -130,7 +146,7 @@ async function commandCode(args, flags) {
   const result = await send('open', {
     target: String(raw),
     force: 'code',
-    root: flags.root ? path.resolve(String(flags.root)) : undefined,
+    root: resolveRoot(flags),
     fresh: Boolean(flags.fresh) && !flags.keep,
   }, { state });
   if (flags.json) jsonOut({ ok: true, spawned, ...result });
@@ -621,12 +637,25 @@ async function commandStop(_args, flags) {
  */
 async function commandBatch(args, flags) {
   const { runBatch, collectFromFile, collectFromDir } = require('../batch');
+  const rootDir = resolveRoot(flags) || null;
+  // 给了 --root 时，相对路径的输入（清单文件、目录）也按 root 解析：
+  // agent 的常见用法就是「工作目录在别处，但一切相对项目根」。
+  const inputPath = (value) => {
+    const raw = String(value);
+    if (rootDir && !path.isAbsolute(raw)) {
+      const inRoot = path.join(rootDir, raw);
+      if (fs.existsSync(inRoot)) return inRoot;
+    }
+    return raw;
+  };
   const items = [];
   for (const arg of args) items.push(arg);
-  if (flags.from) items.push(...collectFromFile(String(flags.from)));
-  if (flags.dir) items.push(...collectFromDir(String(flags.dir), flags.ext));
+  // --from-json 是 --from 的显式别名（清单是 JSON，逐项可带 root），两者都支持
+  const fromFile = flags['from-json'] || flags.from;
+  if (fromFile) items.push(...collectFromFile(inputPath(fromFile)));
+  if (flags.dir) items.push(...collectFromDir(inputPath(flags.dir), flags.ext));
   if (!items.length) {
-    throw Object.assign(new Error('用法：pvs batch <url|file>… | --from list.txt|list.json | --dir <目录> [--ext html]'), { code: 'EUSAGE' });
+    throw Object.assign(new Error('用法：pvs batch <url|file>… | --from list.txt|list.json | --from-json list.json | --dir <目录> [--ext html] [--root <根目录>]'), { code: 'EUSAGE' });
   }
 
   const { state } = await ensureTarget(targetOptions(flags));
@@ -635,6 +664,8 @@ async function commandBatch(args, flags) {
   const report = await send('batch', {
     items,
     outDir,
+    // --root：整批的授权根目录。条目里的相对路径按它解析，截图后的地址栏也按它显示相对路径。
+    root: resolveRoot(flags),
     fullPage: flags['full-page'] !== false,
     format: flags.format === 'jpeg' ? 'jpeg' : 'png',
     timeout: flags.timeout ? Number(flags.timeout) : undefined,

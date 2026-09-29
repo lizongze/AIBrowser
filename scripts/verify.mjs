@@ -687,6 +687,64 @@ async function main() {
     `${codeItem.source} ${codeItem.width}×${codeItem.height}`);
   check(batch.items.every((i) => fs.existsSync(i.image)), '批量结果图片都落在磁盘上');
   check(fs.readFileSync(path.join(batchDir, 'report.json'), 'utf8').includes('"succeeded": 2'), '批量报告写入 outDir');
+
+  // 微信小程序（以及支付宝/抖音等价后缀）的语法高亮：独立语言 id + 复用 html/css/js 模式
+  {
+    const { detectLanguage } = require(path.join(root, 'src', 'main', 'language.js'));
+    const detected = ['wxml', 'wxss', 'wxs', 'axml', 'ttml', 'acss'].map((ext) => `${ext}:${detectLanguage(`a.${ext}`).id}`);
+    check(detected.every((item) => item.split(':')[0] === item.split(':')[1]),
+      '小程序后缀识别为独立语言（wxml/wxss/wxs/axml/ttml/acss）', detected.join(' '));
+
+    const miniDir = path.join(root, '.aibrowser', 'verify-mini');
+    fs.mkdirSync(path.join(miniDir, 'pages'), { recursive: true });
+    const wxml = path.join(miniDir, 'pages', 'index.wxml');
+    fs.writeFileSync(wxml, '<view class="page {{theme}}">\n  <text wx:if="{{loading}}">加载中</text>\n</view>\n');
+    await api('open', { target: wxml, root: miniDir, force: 'code' });
+    await sleep(900);
+    const miniState = await api('panelState');
+    const miniTokens = (await api('panelAction', { action: 'tokens' })).result || {};
+    check(miniState.state?.codeLang === 'WXML' && miniTokens.count > 3 && (miniTokens.colors || []).length >= 2,
+      '面板里 WXML 真的被高亮（有 token 且颜色区分）',
+      `lang=${miniState.state?.codeLang} tokens=${miniTokens.count} colors=${(miniTokens.colors || []).length}`);
+    await api('close', { all: true });
+  }
+
+  // batch --root：整批的授权根目录 —— 条目里的相对路径按它解析，截图后地址栏也按它相对显示
+  const batchRootDir = path.join(batchDir, 'rooted');
+  const rooted = await api('batch', { items: ['demo.html'], root: path.join(root, 'examples'), outDir: batchRootDir, fullPage: true });
+  const rootedItem = (rooted.items || [])[0] || {};
+  // 网页会话的 url 是 pvs://<rootId>/<相对路径> 形式（就是「按 root 解析」的证据）
+  check(rooted.succeeded === 1 && /demo\.html/.test(String(rootedItem.url || '')),
+    'batch --root：整批按该 root 解析相对路径并授权',
+    `${rooted.succeeded}/${rooted.total} · ${rootedItem.url || rootedItem.error || ''}`);
+  await sleep(500);
+  const rootedShown = (await api('panelAction', { action: 'font-report' })).result || {};
+  check(rootedShown.address?.value === 'demo.html',
+    'batch --root 之后地址栏按该 root 显示相对路径',
+    rootedShown.address?.value || '');
+
+  // 一个批次里两项**各自**带 root（--from-json / 清单 JSON 的逐项 root）：
+  // 每项都按自己声明的 root 解析与显示，不能只看「最深/最外层」的根。
+  const perItem = await api('batch', {
+    items: [
+      { file: path.join('src', 'main', 'language.js'), root, name: 'lang' },
+      { file: 'demo.html', root: path.join(root, 'examples'), name: 'demo' },
+    ],
+    outDir: path.join(batchDir, 'per-item-root'),
+    fullPage: true,
+  });
+  const perItems = perItem.items || [];
+  const bothOk = perItem.succeeded === 2
+    && String(perItems[0]?.url || '').includes('src/main/language.js')
+    && String(perItems[1]?.url || '').includes('demo.html');
+  check(bothOk, 'batch 清单里逐项指定 root：两项各自解析成功',
+    perItems.map((i) => i.error || i.url).join(' | '));
+  await sleep(600);
+  const perShown = (await api('panelAction', { action: 'font-report' })).result || {};
+  const perSession = (await api('list')).sessions.find((x) => x.file && x.file.endsWith('demo.html'));
+  check(perShown.address?.value === 'demo.html' && String(perSession?.rootDir || '').endsWith('/examples'),
+    '逐项 root 生效：地址栏按该项自己的 root 显示，会话记着这个 root',
+    `${perShown.address?.value || ''} · rootDir=${perSession?.rootDir || ''}`);
   const openAfterBatch = await api('list');
   // 批量自己开的标签要在下一项开始前关掉，只留最后一项；别的会话（验收前面的步骤开的）不归它管
   check(openAfterBatch.sessions.length <= sessionsBeforeBatch + 1, '批量结束后面板不堆标签',
