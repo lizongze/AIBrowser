@@ -329,8 +329,21 @@ class PreviewManager {
     // 注意：非 WSL 平台 normalizePath 是对同一路径取“规范形式”（非 no-op），
     // Windows 上也会得到稳定形式（如 D:\gitData\...），比原始输入更可靠。
     const candidate = normalizePath(raw);
-    const abs = path.isAbsolute(candidate) ? candidate : path.resolve(candidate);
-    const exists = fs.existsSync(abs);
+    let abs = path.isAbsolute(candidate) ? candidate : path.resolve(candidate);
+    let exists = fs.existsSync(abs);
+    // 相对路径再按「已记录的根目录」找一遍：
+    // 地址栏现在显示的是「相对 root 的路径」，直接回车必须还能打开它
+    // （否则把地址显示短了反而把用户坑了）。先按 cwd 解释，找不到才逐个 root 试。
+    if (!exists && !path.isAbsolute(candidate)) {
+      for (const root of this.files.listRoots()) {
+        const inRoot = path.join(root.dir, candidate);
+        if (fs.existsSync(inRoot)) {
+          abs = normalizePath(inRoot);
+          exists = true;
+          break;
+        }
+      }
+    }
 
     if (exists) {
       // 目录 → 其 index.html；file 始终用归一化后的绝对路径（Windows 路径此时已转成 /mnt/d/...）

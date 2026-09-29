@@ -64,21 +64,26 @@ class FileService {
 
   /**
    * 注册一个根目录。
-   * auto=true 表示「打开文件时顺带注册的目录」，只为让 pvs:// 能读到该文件，
-   * 不是用户选的项目目录 —— 文件树与根目录切换栏只看非 auto 的那些。
+   *
+   * auto=true      「打开文件时顺带注册的目录」，只为让 pvs:// 能读到该文件，不是用户选的项目目录
+   *                —— 文件树与根目录切换栏只看非 auto 的那些。
+   * implicit=true  「启动时按当前工作目录垫的根」：能被文件树/预览使用，但**不算用户记录过 root**。
+   *                地址栏要不要显示「相对 root 的路径」看的就是这个：显式传过 --root / 选过目录
+   *                才相对显示，否则按用户要求显示绝对路径。
    */
-  addRoot(dir, { auto = false } = {}) {
+  addRoot(dir, { auto = false, implicit = false } = {}) {
     const resolved = path.resolve(normalizePath(dir));
     for (const root of this.roots.values()) {
       if (root.dir === resolved) {
-        // 同一个目录后来被显式声明（用户选了它 / 传了 --root），升级成「非自动」
+        // 同一个目录后来被显式声明（用户选了它 / 传了 --root），升级成「非自动 / 非隐式」
         if (!auto && root.auto) root.auto = false;
+        if (!implicit && root.implicit) root.implicit = false;
         return { root: root.dir, id: root.id };
       }
     }
     this.counter += 1;
     const id = `r${this.counter}`;
-    this.roots.set(id, { id, dir: resolved, auto: Boolean(auto), addedAt: Date.now() });
+    this.roots.set(id, { id, dir: resolved, auto: Boolean(auto), implicit: Boolean(implicit), addedAt: Date.now() });
     return { root: resolved, id };
   }
 
@@ -89,7 +94,12 @@ class FileService {
   }
 
   listRoots() {
-    return [...this.roots.values()].map(({ id, dir, auto }) => ({ id, dir, auto: Boolean(auto) }));
+    return [...this.roots.values()].map(({ id, dir, auto, implicit }) => ({
+      id,
+      dir,
+      auto: Boolean(auto),
+      implicit: Boolean(implicit),
+    }));
   }
 
   rootFor(id) {

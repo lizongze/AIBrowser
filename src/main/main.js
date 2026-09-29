@@ -562,7 +562,9 @@ async function bootstrap() {
   if (!files.listRoots().length && flags.cwd !== false) {
     // 默认把「当前工作目录」作为根目录，方便直接浏览
     const cwd = process.env.AIBROWSER_CWD || process.cwd();
-    if (fs.existsSync(cwd)) files.addRoot(cwd);
+    // implicit：只是「按当前工作目录垫一个根」，不算用户记录过 root
+    // （地址栏只对「显式记录过 root」的文件显示相对路径，见 renderer/rootRelative）
+    if (fs.existsSync(cwd)) files.addRoot(cwd, { implicit: true });
   }
 
   createManager();

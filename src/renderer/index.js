@@ -122,22 +122,60 @@ function dirname(p) {
  * 代码区头部展示的路径：优先「相对项目根目录」，更短也更能体现位置；
  * 没有根目录或不在根目录内时退回绝对路径。
  */
+/**
+ * 文件属于哪个「已记录的根目录」。
+ *
+ * 规则（按用户要求）：
+ *   1) 只在**记录过的 root** 内才相对显示；`auto:true`（打开文件时顺带注册的目录）与
+ *      `implicit:true`（按 cwd 垫的根）都不算记录 —— 不指定 root 打开文件时显示绝对路径；
+ *   2) 命中多个 root 时取**最深/最具体**的那个 —— 例如 cwd 根是 `D:\…\monthly-report`、
+ *      又记录了 `…\monthly-report\scripts\_shot_ws\天虎云呼web端`，打开后者里的文件应该
+ *      相对后者显示（`src/views/.../System.vue`），而不是相对 cwd 根那一长串。
+ */
+function rootRelative(file, { explicitOnly = false } = {}) {
+  const target = String(file || '');
+  if (!target) return null;
+  const candidates = state.roots
+    // auto（打开文件顺带注册的目录）永远不算「项目根」。
+    // explicitOnly=true 时再排掉 implicit（按 cwd 垫的根）—— 地址栏用这个开关：
+    // 「显式传过 --root / 选过目录」才相对显示，否则（不指定 root）显示绝对路径。
+    // 代码区头部不加这个开关：它只是「这文件在项目里的位置」提示，垫的 cwd 根也够用。
+    .filter((item) => item && item.auto !== true && (!explicitOnly || item.implicit !== true))
+    .map((item) => String(item.dir || '').replace(/[\\/]+$/, ''))
+    .filter((dir) => dir && (target === dir || target.startsWith(dir + '/') || target.startsWith(dir + '\\')))
+    .sort((a, b) => b.length - a.length); // 最长（最具体）优先
+  const dir = candidates[0];
+  if (!dir) return null;
+  return { dir, relative: target.slice(dir.length + 1) };
+}
+
 function displayPath(file) {
   const target = String(file || '');
   if (!target) return '';
-  // 打开文件时主进程会把文件所在目录也注册成根目录，所以要挑「最外层」的那个，
-  // 相对路径里才会保留目录层级，截图时一眼能看出文件在项目中的位置。
-  const roots = state.roots
-    .map((item) => String(item.dir || '').replace(/[\\/]+$/, ''))
-    .filter((dir) => dir && (target === dir || target.startsWith(dir + '/') || target.startsWith(dir + '\\')))
-    .sort((a, b) => a.length - b.length);
-  for (const dir of roots) {
-    const relative = target.slice(dir.length + 1);
-    // 只有带目录层级的相对路径才有信息量（和被显示的文件名不重复）
-    if (relative.includes('/') || relative.includes('\\')) return relative;
-  }
-  // 文件就在根目录下、或不在任何根目录里：直接给绝对路径
+  const hit = rootRelative(target);
+  // 只有带目录层级的相对路径才有信息量（和被显示的文件名不重复）
+  if (hit && (hit.relative.includes('/') || hit.relative.includes('\\'))) return hit.relative;
+  // 文件就在根目录下、或不在任何「记录过的」根目录里：给绝对路径
   return target;
+}
+
+/**
+ * 地址栏该显示什么。
+ *
+ * 需求：**记录过 root 之后，打开 root 内的文件，地址栏就显示相对 root 的路径**
+ * （`src/views/common/PayDialog/System.vue` 而不是 `D:\…\_shot_ws\天虎云呼web端\src\…`）——
+ * 一眼能看出文件在当前项目里的位置，读起来也短。
+ * 规则与代码区头部一致（displayPath）；不在任何 root 内时保持绝对路径，行为不变。
+ * 输入框的 title 始终放绝对路径，鼠标悬停能看到落盘位置。
+ */
+function addressValue(session) {
+  if (!session) return '';
+  const raw = session.file || session.url || '';
+  if (!session.file) return raw || ''; // 纯 URL 会话：地址栏就是那个 URL
+  const hit = rootRelative(session.file, { explicitOnly: true });
+  // 地址栏比代码区头部更进一步：文件正好在根目录下（相对路径没有目录层级）也显示相对路径，
+  // 用户要的就是「看到它相对 root 的位置」。
+  return hit ? hit.relative : raw;
 }
 
 /**
@@ -747,7 +785,8 @@ async function activateSession(id, { force = false } = {}) {
   }
   state.activeId = id;
   consumeActiveDraft(); // 打开真实会话后，聚焦中的空标签让位（其它空标签保留）
-  el.address.value = session.file || session.url || '';
+  el.address.value = addressValue(session);
+  el.address.title = session.file || session.url || '';
   setOpenMode(isCode ? 'code' : 'web');
   if (session.file) setTreeSelected(session.file); // 树高亮跟着当前标签走
   window.api.sessions.focus(id).catch(() => {});
@@ -1389,7 +1428,8 @@ function wireEventsFromMain() {
       renderSessionList();
       const active = state.activeDraft ? null : sessionById(state.activeId);
       if (active) {
-        el.address.value = active.file || active.url || '';
+        el.address.value = addressValue(active);
+        el.address.title = active.file || active.url || '';
         if (active.kind === 'code' && state.view === 'code' && state.activeCodeSessionId !== active.sessionId) {
           renderCode(active).catch(() => {});
         }
@@ -1539,7 +1579,14 @@ window.__PVS_ACTION__ = (action, payload = {}) => {
         const node = document.querySelector(sel);
         if (!node) return null;
         const cs = getComputedStyle(node);
-        return { family: cs.fontFamily.split(',')[0].replace(/["']/g, ''), size: cs.fontSize, ligatures: cs.fontVariantLigatures };
+        return {
+          family: cs.fontFamily.split(',')[0].replace(/["']/g, ''),
+          size: cs.fontSize,
+          ligatures: cs.fontVariantLigatures,
+          // 表单控件（地址栏）把当前值也带上：验收「显示的是不是相对 root 的路径」要靠它
+          value: 'value' in node ? node.value : undefined,
+          title: node.title || undefined,
+        };
       };
       return {
         editor: pick('.cm-scroller'),

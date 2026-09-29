@@ -651,6 +651,30 @@ async function main() {
     await sleep(400);
   }
 
+  // 地址栏路径：**显式记录过 root** 才显示相对该 root 的路径，没有可用 root 时显示绝对路径。
+  // （用户需求：记录 root 后打开 root 内的文件，地址栏给出相对路径；不指定 root 就绝对路径。）
+  {
+    // 注意用 open（target + root）：openCode 动作不接 root，那样就不是「显式记录 root」了
+    const withRoot = await api('open', { target: codeFile, root, force: 'code' });
+    await sleep(600);
+    const shown = (await api('panelAction', { action: 'font-report' })).result || {};
+    const relValue = shown.address?.value || '';
+    check(relValue === 'src/main/language.js',
+      '地址栏：显式 --root 后显示相对 root 的路径',
+      `${relValue} · title ${shown.address?.title || ''}`);
+
+    const outside = path.join(os.tmpdir(), `pvs-addr-${Date.now()}.js`);
+    fs.writeFileSync(outside, 'const x = 1;\n');
+    await api('openCode', { file: outside });
+    await sleep(600);
+    const shown2 = (await api('panelAction', { action: 'font-report' })).result || {};
+    const absValue = shown2.address?.value || '';
+    check(absValue === outside,
+      '地址栏：没有记录过 root 时显示绝对路径',
+      absValue);
+    await api('close', { sessionId: withRoot.sessionId });
+  }
+
   // 批量：混合 HTML + 代码文件，串行逐个激活标签再截；代码项在产品模式下必须走面板截图
   const batchDir = path.join(root, '.aibrowser', 'verify-batch');
   const sessionsBeforeBatch = (await api('list')).sessions.length;
