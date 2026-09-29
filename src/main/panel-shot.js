@@ -12,6 +12,36 @@
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * 给「可能永远不 resolve」的 Electron 调用套上超时。
+ *
+ * 为什么要它：截图卡住的真正原因不是轮询间隔，而是 **单次 capturePage() 会挂住** ——
+ * 视图不在合成场景里（刚打开的页面还没出帧 / 后台标签）时，这个 Promise 可以几十秒不 resolve，
+ * 于是 deadline 检查根本轮不到（实测第一次截图卡了 29.5s，调用方只看到「这个页面没反应」）。
+ */
+function withTimeout(promise, ms, fallback) {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve(fallback);
+    }, Math.max(50, ms));
+    Promise.resolve(promise).then((value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(value);
+    }, () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(fallback);
+    });
+  });
+}
+
+
 /** 面板窗口可用吗 */
 function panelWindow(manager) {
   const win = manager && manager.guiWindow;
@@ -77,10 +107,10 @@ async function capturePanelShot({ manager, session, format = 'png', quality = 85
   const bounds = session.view && typeof session.view.getBounds === 'function' ? session.view.getBounds() : null;
   if (bounds && session.view && typeof session.view.setVisible === 'function') session.view.setVisible(false);
   try {
-    let image = await win.webContents.capturePage();
+    let image = await withTimeout(win.webContents.capturePage(), 2500, null);
     if (!image || image.isEmpty() || image.getSize().width === 0) {
       await sleep(350);
-      image = await win.webContents.capturePage();
+      image = await withTimeout(win.webContents.capturePage(), 2500, null);
     }
     if (!image || image.isEmpty() || image.getSize().width === 0) return null;
     const buffer = format === 'jpeg' ? image.toJPEG(quality) : image.toPNG();

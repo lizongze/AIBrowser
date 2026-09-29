@@ -104,7 +104,11 @@ class PreviewManager {
   resolve(sessionId, { requireWeb = false } = {}) {
     const session = this.get(sessionId);
     if (!session) {
-      const err = new Error('当前没有可用的预览会话，请先 open 一个文件或 URL');
+      // 明确区分「你要的那个会话没了」和「一个会话都没有」：并发时另一个进程刚 close 掉
+      // 目标会话是很常见的事，这时含糊的「没有可用的会话」会让调用方以为是服务坏了。
+      const err = new Error(sessionId
+        ? `会话 ${sessionId} 不存在或已关闭（可能被另一个进程 close 掉了）：重新 open 一个再操作`
+        : '当前没有可用的预览会话，请先 open 一个文件或 URL');
       err.code = 'NOSESSION';
       throw err;
     }

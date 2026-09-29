@@ -846,11 +846,19 @@ async function main() {
   const logPathGuess = fs.existsSync(daemonLog)
     ? daemonLog
     : path.join(process.env.XDG_RUNTIME_DIR || path.join(os.homedir(), '.aibrowser'), 'aibrowser', 'daemon.log');
+  // 拉起是「返回即返回」的，daemon 写日志要几秒：这里轮询等它出现，别读了个空文件就判失败
   let logText = '';
-  try {
-    logText = fs.readFileSync(logPathGuess, 'utf8');
-  } catch {
-    logText = '';
+  {
+    const by = Date.now() + 20000;
+    while (Date.now() < by) {
+      try {
+        logText = fs.readFileSync(logPathGuess, 'utf8');
+      } catch {
+        logText = '';
+      }
+      if (logText.includes('[aibrowser] daemon · pid')) break;
+      await sleep(400);
+    }
   }
   check(
     logRun.status === 0 && logText.includes('[aibrowser] daemon · pid'),

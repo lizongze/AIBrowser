@@ -13,6 +13,36 @@ const { normalizePath } = require('./file-service');
 const { isWatchedFile, describeExtensions } = require('./watch-scope');
 const { applyIdentity, applyIdentitySync } = require('./browser-identity');
 
+/**
+ * 给「可能永远不 resolve」的 Electron 调用套上超时。
+ *
+ * 为什么要它：截图卡住的真正原因不是轮询间隔，而是 **单次 capturePage() 会挂住** ——
+ * 视图不在合成场景里（刚打开的页面还没出帧 / 后台标签）时，这个 Promise 可以几十秒不 resolve，
+ * 于是 deadline 检查根本轮不到（实测第一次截图卡了 29.5s，调用方只看到「这个页面没反应」）。
+ */
+function withTimeout(promise, ms, fallback) {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve(fallback);
+    }, Math.max(50, ms));
+    Promise.resolve(promise).then((value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(value);
+    }, () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(fallback);
+    });
+  });
+}
+
+
 // 在页面里收集它引用的本地资源。
 // 注意：Electron 对自定义 pvs:// 协议不产生 resource timing 条目（实测只有 navigation 与 http 请求），
 // 所以这里以 DOM 为准，再合并 resource timing（动态 fetch 出来的资源会出现在那里）。
@@ -624,7 +654,7 @@ class PreviewSession {
    *   - 离屏渲染（Linux/WSLg）：等 paint 事件产出位图，必要时 invalidate 触发重绘；
    *   - Windows：离屏模式不产出帧，改用屏幕外窗口 + capturePage，并轮询等待首帧。
    */
-  async grabFrame(rect, { timeoutMs = 4000 } = {}) {
+  async grabFrame(rect, { timeoutMs = 3000 } = {}) {
     const usable = (image) => {
       if (!image) return false;
       if (image.isEmpty()) return false;
@@ -647,27 +677,33 @@ class PreviewSession {
     }
 
     // 通用路径：capturePage，轮询等待首帧（页面加载/合成都需要时间）。
-    // 预算默认 4s：拿不到帧多半是「这个会话不在合成场景里」（后台标签），
-    // 越早失败越好 —— 以前这里干等 10s、加上加载等待能到 25s+，调用方只会看到「卡住」。
-    const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 4000);
-    while (Date.now() < deadline) {
-      try {
-        const shot = rect ? await this.webContents.capturePage(rect) : await this.webContents.capturePage();
-        if (usable(shot)) return shot;
-      } catch {
-        /* 继续重试 */
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    // 预算默认 3s，而且**每次调用单独限时**（1.2s）：单次 capturePage 挂住时立刻放弃 ——
+    // 不能让一个不 resolve 的 Promise 把整个 deadline 架空（实测就是这么卡到 29.5s 的）。
+    try {
+      this.webContents.invalidate();
+    } catch {
+      /* 有些宿主没有这个方法 */
     }
-
-    // 最后再试整窗截图（窗口不可见/被裁剪时可能反而可用）
-    if (this.window && !this.window.isDestroyed()) {
+    const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 3000);
+    while (Date.now() < deadline) {
+      const shot = await withTimeout(
+        rect ? this.webContents.capturePage(rect) : this.webContents.capturePage(),
+        1200,
+        null,
+      );
+      if (usable(shot)) return shot;
       try {
-        const windowShot = await this.window.capturePage();
-        if (usable(windowShot)) return windowShot;
+        this.webContents.invalidate(); // 戳一下，让它产出一帧
       } catch {
         /* ignore */
       }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    // 最后再试整窗截图（窗口不可见/被裁剪时可能反而可用），同样限时
+    if (this.window && !this.window.isDestroyed()) {
+      const windowShot = await withTimeout(this.window.capturePage(), 1500, null);
+      if (usable(windowShot)) return windowShot;
     }
 
     throw new Error(
@@ -704,7 +740,7 @@ class PreviewSession {
     // 代码会话先把代码渲染成页面，之后走同一条截图链路。
     // 加载等待收短（6s）：截图是「看一眼现在什么样」的操作，卡在这里不如快速报错 + 让调用方重试。
     await this.ensureCodePageLoaded({});
-    await this.ensureLoaded(6000);
+    await this.ensureLoaded(4000);
     this.requireHost();
     if (selector) {
       const rect = await this.runInPage(`(() => {

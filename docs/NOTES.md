@@ -552,3 +552,39 @@ tar -xzOf dist-skill/aibrowser-skill-0.1.0-win32-x64.tar.gz \
 
 验收：verify 98/98（新增行为断言：无头在跑时直接启动应用会接管成面板、并保持原实例不被顶掉），
 smoke 18/18。
+
+## 「某个页面截图像卡住」的真凶：单次 capturePage() 会不 resolve
+
+用户报的现象：连续打开多个 url 页面、截图、关闭时，小概率有 1 个页面「一直停在那里、像没响应」。
+我按这个场景做了压测（本地 html 用 `file://` URL）：
+
+| 压测 | 结果 |
+| --- | --- |
+| 顺序 open→shot→close（15 轮 / skill 包装 20 轮 / 3 标签 8 轮） | 全绿，open≈180ms · shot≈600ms · close≈140ms |
+| **并发抢焦点**：1 进程不停开页 + 3 进程随机「截某会话 → 立刻关掉它」 | **复现**：60s 内 187 次操作有 6 次 shot 卡满超时；10s 内 3 次 |
+
+我先猜是「截图串行队列排太深」，但排队最多只有 3.5s —— 排队解释不了 30s。加上分段计时
+（`AIBROWSER_DEBUG_CAPTURE=1` 会把「排队 / 挂视图 / 取帧 / 回退」各段耗时写进 gui.log）后真相很清楚：
+
+```
+[capture] queue=0ms session=s3 kind=web
+[capture] attach=0ms（changed=false 原活动=s3）
+[capture] session.screenshot 失败（29483ms）：当前环境取不到渲染帧（… host=view …）
+```
+
+**`capturePage()` 自己会挂住**：视图不在合成场景里（刚打开的页面还没出帧、或后台标签）时，这个
+Promise 可以几十秒不 resolve。我原来给 `grabFrame` 设的 3s「预算」只在**两次尝试之间**检查 deadline，
+单次调用挂住时那个检查根本轮不到 —— 于是 3s 预算变成了 29.5s 实测。
+
+三处一起修：
+
+1. `preview-session.withTimeout()` / `panel-shot.withTimeout()`：**每次 capturePage 单独限时**
+   （会话帧 1.2s、整窗兜底 1.5s、面板截图 2.5s），挂住就放弃这一次，deadline 才真正生效。
+2. `captureOnce()` 里先 `webContents.invalidate()` 戳一帧；失败时再戳一次。
+3. 截图不再「抢两次活动标签」：新增 `attachSessionView()` —— 主进程直接把目标视图挂上
+   （`setActiveView`，不走渲染层往返），截完立刻还原原来那一屏。以前 `activateSession` 要等渲染层确认
+   （最多 3s），并发时经常 `activated=false`，再叠一次重试就十几秒了。
+4. 顺带：`resolve()` 的报错区分「你要的那个会话被另一个进程关掉了」与「一个会话都没有」——
+   前者在并发里是常态，含糊的「没有可用的会话」会让人以为服务坏了。
+
+修完复测（同样 10s 并发风暴）：**0 次超时**（修前 3 次）；顺序用法 shot 反而更快（600ms → 260-380ms）。

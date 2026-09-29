@@ -11,6 +11,17 @@ const os = require('node:os');
 const path = require('node:path');
 const { bindSocket, runtimeDir, socketPath, writeState, env } = require('./state');
 const { activateSession, capturePanelShot, panelWindow } = require('../panel-shot');
+const { writeStderr } = require('../safe-io');
+
+/**
+ * 截图各阶段的耗时打点（AIBROWSER_DEBUG_CAPTURE=1 打开）。
+ * 为什么要它：「某个页面截图卡到超时」这种问题靠猜容易猜错（排队深度、渲染慢、capturePage 空转
+ * 都会表现得一样），只有把「排队 / 切标签 / 取会话帧 / 回退面板截图」分段计时才能定位。
+ */
+const debugCapture = (msg) => {
+  if (process.env.AIBROWSER_DEBUG_CAPTURE !== '1') return;
+  writeStderr(`[capture] ${msg}\n`);
+};
 const { resolveIdentity, describeIdentity } = require('../browser-identity');
 
 const VERSION = require('../../../package.json').version;
@@ -103,17 +114,39 @@ async function captureSessionShot({ manager, session, params = {} }) {
   // 别的进程可能正在 open/切标签（它不走这把锁：open 会等页面加载，不该把截图堵在它后面）。
   // 所以「抢活动标签 → 取帧」允许抢两次：取完发现标签已被别人切走，就再抢一次，
   // 否则会截到别人的页面（或干脆空帧超时）。
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const attemptResult = await captureOnce({ manager, session, params, win });
-    if (!win || manager.activeViewId === session.id || attempt === 2) return attemptResult;
-    await sleep(120);
-  }
-  return null;
+  // 以前这里会「抢两次」：第一次没抢到活动标签就再来一次。实测这会翻倍耗时
+  // （每次 activate 要等渲染层确认，最多 3s），并发时单个截图能拖到十几秒。
+  // 现在改成：主进程直接把目标视图挂上（见 attachSessionView），一次到位。
+  const t0 = Date.now();
+  const result = await captureOnce({ manager, session, params, win });
+  debugCapture(`一次完成 用时=${Date.now() - t0}ms session=${session.id}`);
+  return result;
+}
+
+/**
+ * 把目标会话的原生视图**直接挂到面板上**，不等渲染层。
+ *
+ * 为什么不用 activateSession：那条路要「请渲染层切标签 → 等它重新渲染 → 上报活动会话」，
+ * 并发截图时经常在 3s 内等不到确认（实测 activated=false），于是取不到帧 → 回退面板截图 →
+ * 又重试一次，单个截图能拖到十几秒，调用方看到的就是「这个页面卡住了」。
+ * 这里只改主进程侧的 activeView（视图挂载完全由 applyView 决定），截完立刻把原活动会话还回去，
+ * 面板 UI 的标签高亮因此不用动 —— 用户看到的还是他原来那一屏。
+ */
+function attachSessionView(manager, session) {
+  const previous = manager.activeViewId;
+  if (previous === session.id) return { changed: false, previous };
+  manager.setActiveView(session.id);
+  return { changed: true, previous };
 }
 
 async function captureOnce({ manager, session, params = {}, win }) {
-  // 面板模式：不管代码还是网页，先让目标会话产生帧
-  const activated = win ? await activateSession({ manager, session }) : false;
+  // 面板模式：先让目标会话的原生视图进合成场景（后台标签不产生帧）。
+  // 直接改主进程的 activeView，不走渲染层往返 —— 这是并发下稳定的关键。
+  const tAttach = Date.now();
+  const attached = win ? attachSessionView(manager, session) : { changed: false, previous: null };
+  if (attached.changed) await sleep(220); // 等一帧新挂上的画面
+  debugCapture(`attach=${Date.now() - tAttach}ms（changed=${attached.changed} 原活动=${attached.previous}）`);
+  const activated = Boolean(win);
 
   // 面板模式下的代码会话优先「截面板」：含标签条与行号栏，和用户看到的画面一致。
   // （它的 pvs://code/ 原生视图是隐藏的，隐藏视图不产生帧。）
@@ -143,6 +176,7 @@ async function captureOnce({ manager, session, params = {}, win }) {
 
   const urlBefore = session.url;
   let shot = null;
+  const tShot = Date.now();
   try {
     shot = await session.screenshot({
       format: params.format || 'png',
@@ -151,10 +185,12 @@ async function captureOnce({ manager, session, params = {}, win }) {
       selector: params.selector,
     });
   } catch (err) {
+    debugCapture(`session.screenshot 失败（${Date.now() - tShot}ms）：${err.message}`);
     // 面板模式下取不到帧时的兜底：整块面板截一张（里面就有这个标签的渲染结果）。
     // 比「超时报错」有用得多 —— 调用方拿到的是图，source 会标成 panel 让它知道含标签条。
     if (win) {
       const fallback = await capturePanelShot({ manager, session, format: params.format, quality: params.quality }).catch(() => null);
+      if (attached.changed) manager.setActiveView(attached.previous);
       if (fallback) {
         const result = {
           sessionId: session.id,
@@ -179,6 +215,8 @@ async function captureOnce({ manager, session, params = {}, win }) {
     }
     throw err;
   }
+  debugCapture(`session.screenshot=${Date.now() - tShot}ms source=${shot ? 'ok' : 'none'}`);
+  if (attached.changed) manager.setActiveView(attached.previous);
   // 代码会话回退到代码页截图后，恢复到原本的会话标识，界面不应显示成 pvs://code/
   if (session.kind === 'code' && urlBefore) session.url = urlBefore;
   const result = {
@@ -592,7 +630,11 @@ class ControlServer {
         // 面板模式下「只有活动标签的原生视图在合成场景里」：截后台会话必须先把它切成活动标签，
         // 否则 capturePage 永远是空帧（表现就是「后台网页截图超时」）。
         // 并发调用交给 manager.runExclusive 串行：否则两个进程各自切标签、互相把对方的视图摘掉，谁都截不到。
-        const capture = () => captureSessionShot({ manager, session, params });
+        const queuedAt = Date.now();
+        const capture = () => {
+          debugCapture(`queue=${Date.now() - queuedAt}ms session=${session.id} kind=${session.kind}`);
+          return captureSessionShot({ manager, session, params });
+        };
         if (panelWindow(manager) && typeof manager.runExclusive === 'function') {
           return manager.runExclusive(capture);
         }
