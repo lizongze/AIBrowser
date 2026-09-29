@@ -557,11 +557,16 @@ class ControlServer {
             target: params.target,
             force: params.force === 'code' ? 'code' : params.force === 'web' ? 'web' : undefined,
             root: params.root,
+            // 行号：代码文件打开后定位到该行（网页会话忽略）
+            line: params.line,
+            column: params.column,
             focus: params.focus !== false,
           });
           return {
             sessionId: session.id,
             kind,
+            line: session.line ?? null,
+            column: session.column ?? null,
             url: session.info().url,
             title: session.title,
             file: session.file,
@@ -588,7 +593,15 @@ class ControlServer {
           column: params.column,
           focus: params.focus !== false,
         });
-        return { sessionId: session.id, kind: 'code', file: session.file, language: session.language };
+        return {
+          sessionId: session.id,
+          kind: 'code',
+          file: session.file,
+          language: session.language,
+          // 回传定位结果，调用方能确认「真的定位到了第几行」
+          line: session.line ?? null,
+          column: session.column ?? null,
+        };
       }
 
       case 'openPath': {
@@ -787,6 +800,8 @@ class ControlServer {
           fullPage: params.fullPage !== false,
           format: params.format === 'jpeg' ? 'jpeg' : 'png',
           timeout: Number(params.timeout) || undefined,
+          // 整批的授权根目录（pvs batch --root <dir>）：相对路径按它解析，地址栏也按它显示相对路径
+          root: params.root,
           manager: this.manager,
         });
         // 结果清单落盘，便于 AI 后续读取或续跑

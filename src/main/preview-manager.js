@@ -347,7 +347,7 @@ class PreviewManager {
    * HTML/SVG 走网页预览，其它文件走代码预览（除非 force='web'）。
    * @param {{target?:string, force?:'code'|'web', root?:string, focus?:boolean}} opts
    */
-  async openSmart({ target, force, root, focus = true } = {}) {
+  async openSmart({ target, force, root, line, column, focus = true } = {}) {
     const raw = String(target || '').trim();
     if (!raw) throw new Error('需要 target（文件路径或 URL）');
     if (root) this.files.addRoot(root);
@@ -385,7 +385,7 @@ class PreviewManager {
       const wantWeb = force === 'web' || (force !== 'code' && isWebPreviewable(file));
       const session = wantWeb
         ? await this.open({ file, root, focus })
-        : await this.openCode({ file, root, focus });
+        : await this.openCode({ file, root, line, column, focus });
       // 声明过的 root 已由 open()/openCode() 在广播前写入 session.declaredRoot；
       // 这里只兜底（万一走了别的路径创建会话）
       if (root && !session.declaredRoot) {

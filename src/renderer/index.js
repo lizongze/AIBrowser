@@ -452,6 +452,32 @@ function ensureEditor() {
   return state.editorView;
 }
 
+/**
+ * 让编辑器跳到指定行（并把光标/高亮放在那一行）。
+ *
+ * 同一个 `会话:行号` 只跳一次：否则每次重绘（会话更新、窗口变化）都会把用户手动滚动的位置拽回去。
+ * 用 `state.lastJumpKey` 记最近一次跳过的 key —— 再次用同一行号打开不会重复跳，
+ * 换一个行号（或换文件）会正常跳。
+ */
+function jumpEditorToLine(sessionId, line, column) {
+  const view = state.editorView;
+  if (!view || !line) return false;
+  const key = `${sessionId}:${line}:${column || 0}`;
+  if (state.lastJumpKey === key) return false;
+  try {
+    const wanted = Math.min(Math.max(1, Number(line)), view.state.doc.lines);
+    const info = view.state.doc.line(wanted);
+    const offset = Math.max(0, Number(column || 1) - 1);
+    const pos = info.from + Math.min(offset, info.length);
+    view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+    view.focus();
+    state.lastJumpKey = key;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function renderCode(session) {
   const view = ensureEditor();
   state.activeCodeSessionId = session.sessionId;
@@ -462,7 +488,6 @@ async function renderCode(session) {
   const needLoad = loadedDoc.sessionId !== session.sessionId
     || loadedDoc.file !== file
     || view.state.doc.length === 0;
-
   if (needLoad) {
     state.activeFile = file;
     state.treeSelected = file;
@@ -518,15 +543,8 @@ async function renderCode(session) {
     if (renderedNow > 0 && heightNow > 0) break;
   }
 
-  const line = Number(session.line || meta.line || 0);
-  if (line > 0) {
-    try {
-      const lineInfo = view.state.doc.line(Math.min(line, view.state.doc.lines));
-      view.dispatch({ selection: { anchor: lineInfo.from }, scrollIntoView: true });
-    } catch {
-      /* ignore */
-    }
-  }
+  // 跳到指定行（同一 key 只跳一次，见 jumpEditorToLine）
+  jumpEditorToLine(session.sessionId, Number(meta.line || session.line || 0), Number(meta.column || session.column || 0));
   el.codeSave.hidden = !state.codeSessions.get(session.sessionId)?.dirty;
   const paintedLines = document.querySelectorAll('.cm-line').length;
   setStatus(
@@ -789,9 +807,15 @@ function syncNativeViewNow() {
   }
 }
 
-async function activateSession(id, { force = false } = {}) {
+async function activateSession(id, { force = false, line = 0, column = 0 } = {}) {
   const session = sessionById(id);
   if (!session) return;
+  // 幂等守卫会在「同一会话已装载」时提前返回（不会走到 renderCode），
+  // 所以「跳到指定行」必须在这里先处理 —— 否则对已经打开过的文件，
+  // `pvs code f.js --line 40` 只会更新会话里的行号，界面上不动。
+  if (session.kind === 'code' && line && state.activeCodeSessionId === id) {
+    jumpEditorToLine(id, Number(line), Number(column || 0));
+  }
   // 面板还在启动（文件树/会话列表尚未就绪）时先跳过，boot 结束会补一次激活，
   // 否则启动瞬间进来的 open 请求会被静默丢弃。
   if (!state.booted) return;
@@ -1487,7 +1511,11 @@ function wireEventsFromMain() {
     activateSession(payload.sessionId).catch(() => {});
   });
   window.api.on('ui:open', (payload) => {
-    refreshSessions().then(() => activateSession(payload.sessionId)).catch(() => {});
+    // payload 里带着 line/column（`pvs code f.js --line 40`）：交给 activateSession，
+    // 已装载的会话也能跳过去（否则幂等守卫会直接返回、界面不动）
+    refreshSessions()
+      .then(() => activateSession(payload.sessionId, { line: payload.line, column: payload.column }))
+      .catch(() => {});
   });
   window.api.on('ui:sidebar', (payload) => {
     setSidebar(payload.visible !== false, { notify: false });
@@ -1726,6 +1754,25 @@ window.__PVS_PANEL__ = () => {
     cmEditor: Boolean(document.querySelector('.cm-editor')),
     cmChars: cmContent ? cmContent.textContent.length : 0,
     cmFirstLine: (document.querySelector('.cm-line') || { textContent: '' }).textContent.slice(0, 60),
+    // 行号跳转的验收信号：当前首个可见行的行号 + 光标所在行号
+    cmTopLine: (() => {
+      try {
+        const view = state.editorView;
+        // 用滚动位置算「第一行可见行」：visibleRanges 会带上文档开头的 overscan，不能代表滚到哪了
+        const block = view.lineBlockAtHeight(view.scrollDOM.scrollTop);
+        return view.state.doc.lineAt(block.from).number;
+      } catch {
+        return null;
+      }
+    })(),
+    cmCursorLine: (() => {
+      try {
+        const view = state.editorView;
+        return view.state.doc.lineAt(view.state.selection.main.head).number;
+      } catch {
+        return null;
+      }
+    })(),
     codeName: document.getElementById('code-name').textContent,
     codeLang: document.getElementById('code-lang').textContent,
     codePath: document.getElementById('code-path').textContent,

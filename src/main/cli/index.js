@@ -116,17 +116,41 @@ function resolveRoot(flags) {
   return resolved;
 }
 
+/**
+ * 解析 `文件:行号[:列号]` 简写（很多工具都这么用）。
+ * 只在「冒号前那部分真的是本地文件」时才拆 —— 否则会把 `http://host:8080/page`
+ * 这种 URL 拆坏（URL 前段不是本地路径，existsSync 为假，自然不拆）。
+ */
+function splitLineSpec(raw, flags) {
+  const text = String(raw || '');
+  let target = text;
+  let line = flags.line !== undefined ? Number(flags.line) : undefined;
+  let column = flags.column !== undefined ? Number(flags.column) : undefined;
+  if (line === undefined) {
+    const m = text.match(/^(.*?):(\d+)(?::(\d+))?$/);
+    if (m && m[1] && fs.existsSync(path.resolve(normalizePath(m[1])))) {
+      target = m[1];
+      line = Number(m[2]);
+      if (m[3]) column = Number(m[3]);
+    }
+  }
+  return { target, line, column };
+}
+
 async function commandOpen(args, flags) {
   const raw = args[0];
   if (!raw) throw Object.assign(new Error('用法：pvs open <file|url|target>'), { code: 'EUSAGE' });
   const { state, spawned } = await ensureTarget(targetOptions(flags));
   // 原样透传：类型判断与路径补全都在服务端做（manager.openSmart），
   // 这里任何「补全或猜测」都会把 URL 拼成本地路径、或把 Windows 路径拼坏。
-  const target = String(raw);
+  const { target, line, column } = splitLineSpec(raw, flags);
   const result = await send('open', {
     target,
     force: flags.mode === 'code' ? 'code' : undefined,
-    root: resolveRoot(flags), // 上一版这里错写成 batch 里的局部变量 rootDir → ReferenceError
+    root: resolveRoot(flags),
+    // 代码文件可以顺手定位到某一行（`pvs open a.js --line 42` 或 `pvs open a.js:42`）
+    line,
+    column,
 
     fresh: Boolean(flags.fresh) && !flags.keep,
   }, { state, timeoutMs: 30000 });
@@ -142,16 +166,22 @@ async function commandOpen(args, flags) {
 
 async function commandCode(args, flags) {
   const raw = args[0];
-  if (!raw) throw Object.assign(new Error('用法：pvs code <file>'), { code: 'EUSAGE' });
+  if (!raw) throw Object.assign(new Error('用法：pvs code <file> [--line n] [--column n]，也支持 <file>:<line>'), { code: 'EUSAGE' });
   const { state, spawned } = await ensureTarget(targetOptions(flags));
+  const { target, line, column } = splitLineSpec(raw, flags);
   const result = await send('open', {
-    target: String(raw),
+    target,
     force: 'code',
     root: resolveRoot(flags),
+    line,
+    column,
     fresh: Boolean(flags.fresh) && !flags.keep,
   }, { state });
   if (flags.json) jsonOut({ ok: true, spawned, ...result });
-  else out(`代码会话 [${result.sessionId}] ${result.file} (${result.language || result.kind})`);
+  else {
+    out(`代码会话 [${result.sessionId}] ${result.file} (${result.language || result.kind})`
+      + (result.line ? ` · 第 ${result.line} 行` : ''));
+  }
   return EXIT_OK;
 }
 

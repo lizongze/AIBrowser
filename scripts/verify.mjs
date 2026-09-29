@@ -712,6 +712,38 @@ async function main() {
     check(String(cliOpenRoot.stdout || '').includes('"ok":true'), 'CLI 的 pvs code --root 正常', String(cliOpenRoot.stderr || '').slice(0, 120));
   }
 
+  // 行号定位：`--line` / `file:line` 打开代码文件后，编辑器要**真的跳过去**
+  // （新会话与已装载的旧会话都要生效：后者以前被幂等守卫挡住，界面不动）
+  {
+    const bigFile = path.join(root, 'src', 'main', 'watch-scope.js');
+    const totalLines = fs.readFileSync(bigFile, 'utf8').split('\n').length;
+    const target = Math.max(5, Math.min(30, totalLines - 1));
+
+    const fresh = spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'code', bigFile, '--line', String(target), '--root', root, '--json'], { encoding: 'utf8', timeout: 60000 });
+    await sleep(1200);
+    const st1 = await api('panelState');
+    check(Number(st1.state?.cmCursorLine) === target && String(fresh.stdout).includes(`"line":${target}`),
+      'pvs code --line N：新会话直接跳到第 N 行',
+      `cursor=${st1.state?.cmCursorLine} 期望=${target}`);
+
+    // 同一个文件再开一次（会话复用），换一个行号也必须跳
+    const target2 = Math.min(totalLines - 1, target + 12);
+    spawnSync(process.execPath, [path.join(root, 'bin', 'pvs.js'), 'code', `${bigFile}:${target2}`, '--root', root, '--json'], { encoding: 'utf8', timeout: 60000 });
+    await sleep(1200);
+    const st2 = await api('panelState');
+    check(Number(st2.state?.cmCursorLine) === target2,
+      'pvs code <file>:<line>：复用已打开的会话也会跳过去',
+      `cursor=${st2.state?.cmCursorLine} 期望=${target2}`);
+
+    // HTTP 动作同样支持
+    const viaApi = await api('openCode', { file: bigFile, line: 4 });
+    await sleep(1000);
+    const st3 = await api('panelState');
+    check(viaApi.line === 4 && Number(st3.state?.cmCursorLine) === 4,
+      'openCode 动作支持 line（AI / MCP 走这条路）',
+      `line=${viaApi.line} cursor=${st3.state?.cmCursorLine}`);
+  }
+
   // 微信小程序（以及支付宝/抖音等价后缀）的语法高亮：独立语言 id + 复用 html/css/js 模式
   {
     const { detectLanguage } = require(path.join(root, 'src', 'main', 'language.js'));

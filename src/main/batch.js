@@ -264,6 +264,9 @@ async function runBatch(opts) {
           target,
           force: item.force,
           root: item.root,
+          // 条目可以指定行号：批量截「某个文件的第 N 行」很方便
+          line: item.line,
+          column: item.column,
         });
         // 代码会话也能截图：screenshot() 内部会先把代码渲染成 pvs://code/ 页面
         session = opened.session;
