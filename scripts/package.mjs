@@ -66,7 +66,7 @@ function normalizePlatformName(value) {
  * 人会以为脚本坏了 —— 现在至少会说出来）。
  */
 function parseArgs(argv) {
-  const out = { targets: [], arch: [], keepDir: false, skipExisting: false, unknown: [] };
+  const out = { targets: [], arch: [], keepDir: false, skipExisting: false, jobs: 0, unknown: [] };
   const split = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
@@ -74,6 +74,7 @@ function parseArgs(argv) {
     else if (token === '--arch') out.arch.push(...split(argv[++i]));
     else if (token === '--keep-dir') out.keepDir = true;
     else if (token === '--skip-existing') out.skipExisting = true;
+    else if (token === '--jobs') out.jobs = Math.max(1, Number(argv[++i]) || 1);
     else out.unknown.push(token);
   }
   if (!out.targets.length) out.targets = [process.platform];
@@ -575,23 +576,36 @@ async function main() {
     process.exit(1);
   }
   await fsp.mkdir(releaseDir, { recursive: true });
-  const results = [];
-  for (const platform of args.targets) {
-    for (const arch of args.archList) {
-      process.stdout.write(`[package] 打包 ${platform}-${arch} …\n`);
+  const jobs = args.targets.flatMap((platform) => args.archList.map((arch) => ({ platform, arch })));
+  // 并行度：默认 min(4, CPU 数)（每个任务只在自己的临时目录里干活、只写自己那个 zip，
+  // 所以天然可以并行；manifest.json 在最后串行写一次）。--jobs 1 可以退回串行。
+  const limit = Math.max(1, Math.min(args.jobs || 4, os.cpus().length || 4, jobs.length));
+  process.stdout.write(`[package] 并行度：${limit}${limit > 1 ? '（--jobs 1 可退回串行）' : ''}\n`);
+  const results = new Array(jobs.length);
+  let cursor = 0;
+  const worker = async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= jobs.length) return;
+      const { platform, arch } = jobs[index];
+      const tag = `${platform}-${arch}`;
+      const started = Date.now();
+      process.stdout.write(`[package] ${tag} 开始…\n`);
       try {
         const result = await packageOne(platform, arch, args);
-        results.push(result);
+        results[index] = result;
         process.stdout.write(result.ok
-          ? `[package]   ✓ ${path.relative(root, result.archive)}（${Math.round(result.archiveBytes / 1024 / 1024)}MB，${result.elapsedMs}ms）\n`
-          : `[package]   ✗ ${result.error}\n`);
+          ? `[package]   ✓ ${tag} ${path.basename(result.archive)}（${Math.round(result.archiveBytes / 1024 / 1024)}MB，`
+            + `${result.elapsedMs}ms，实测 ${Date.now() - started}ms）\n`
+          : `[package]   ✗ ${tag} ${result.error}\n`);
       } catch (err) {
-        results.push({ platform, arch, ok: false, error: err.message });
-        process.stdout.write(`[package]   ✗ ${err.message}\n`);
+        results[index] = { platform, arch, ok: false, error: err.message };
+        process.stdout.write(`[package]   ✗ ${tag} ${err.message}\n`);
         if (process.env.AIBROWSER_PACKAGE_DEBUG) process.stdout.write(`${err.stack}\n`);
       }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: limit }, worker));
 
   const manifestPath = path.join(releaseDir, 'manifest.json');
   // 与已有清单合并：一次只打一个平台时，不要把别的平台记录抹掉

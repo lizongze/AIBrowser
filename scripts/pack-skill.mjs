@@ -41,7 +41,7 @@ function normalizePlatformName(value) {
  * 认不出来的参数会明确警告（空格分隔会被当成无关参数，以前是静默丢掉）。
  */
 function parseArgs(argv) {
-  const out = { platforms: [], arch: [], tar: true, fromCache: false, unpacked: false, outDir: null, reuse: false, combined: false, unknown: [] };
+  const out = { platforms: [], arch: [], tar: true, fromCache: false, unpacked: false, outDir: null, reuse: false, combined: false, jobs: 0, unknown: [] };
   const split = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
@@ -51,6 +51,7 @@ function parseArgs(argv) {
     else if (token === '--unpacked') out.unpacked = true;
     else if (token === '--out-dir') out.outDir = String(argv[++i] || '');
     else if (token === '--reuse') out.reuse = true;
+    else if (token === '--jobs') out.jobs = Math.max(1, Number(argv[++i]) || 1);
     else if (token === '--combined') out.combined = true;
     else if (token === '--from-cache') out.fromCache = true;
     else out.unknown.push(token);
@@ -362,6 +363,26 @@ async function writeIndex(results, args) {
   return manifestFile;
 }
 
+/**
+ * 小并行池：packaging 是给每个「平台-架构」独立目录、独立产物的活，
+ * 天生可以并行（实测并行比串行快，尤其 tar 压缩这一步）。--jobs 1 退回串行。
+ */
+function poolLimit(args, count) {
+  return Math.max(1, Math.min(args.jobs || 4, os.cpus().length || 4, count));
+}
+
+async function runPool(items, limit, worker) {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   // 在系统临时目录（Linux 原生盘）里组装：repo 在 /mnt/d（drvfs）上，几千个小文件（含 15MB 的 app.asar）
@@ -391,19 +412,28 @@ async function main() {
   const platforms = {};
   const results = [];
 
-  for (const platform of args.platforms) {
-    for (const arch of args.archList) {
+  const jobs = args.platforms.flatMap((platform) => args.archList.map((arch) => ({ platform, arch })));
+  const limit = poolLimit(args, jobs.length);
+  process.stdout.write(`[skill] 并行度：${limit}${limit > 1 ? '（--jobs 1 可退回串行）' : ''}\n`);
+  // 先串行把需要的 release 包准备好：它们会写同一份 release/manifest.json，并行会互相踩
+  for (const job of jobs) {
+    if (args.reuse) continue;
+    ensureReleaseZip(job.platform, job.arch, args.fromCache);
+  }
+  await runPool(jobs, limit, async (job) => {
+    const { platform, arch } = job;
+    {
     const existingTar = path.join(outRoot, `aibrowser-skill-${appVersion}-${platform}-${arch}.tar.gz`);
     if (args.reuse && fs.existsSync(existingTar)) {
       process.stdout.write(`[skill] 复用已存在的 ${path.basename(existingTar)}\n`);
       const entry = await recordExisting(existingTar, platform, arch);
       results.push(entry);
-      continue;
+      return;
     }
     const zip = ensureReleaseZip(platform, arch, args.fromCache);
     if (!zip) {
       process.stdout.write(`[skill]   ✗ ${platform}-${arch}：没有 release 包，跳过\n`);
-      continue;
+      return;
     }
     const key = `${platform}-${arch}`;
     const dest = path.join(bundleRoot, key);
@@ -430,7 +460,7 @@ async function main() {
     const cli = platform === 'win32' ? 'pvs.cmd' : 'pvs';
     if (!fs.existsSync(path.join(dest, exe))) {
       process.stdout.write(`[skill]   ✗ ${key}：解包后找不到 ${exe}\n`);
-      continue;
+      return;
     }
     if (platform !== 'win32') {
       try {
@@ -453,7 +483,7 @@ async function main() {
     };
     process.stdout.write(`[skill]   ✓ ${key}（${Math.round(dirSize(dest) / 1024 / 1024)}MB）\n`);
     }
-  }
+  });
 
   const manifest = {
     name: 'aibrowser-skill',
@@ -541,17 +571,19 @@ async function main() {
         note: '合并包：一份 skill 里带多个平台',
       });
     }
-    for (const [key, info] of keys.length && !args.combined ? Object.entries(platforms) : []) {
+    const tarJobs = keys.length && !args.combined ? Object.entries(platforms) : [];
+    const tarResults = new Array(tarJobs.length);
+    await runPool(tarJobs, limit, async ([key, info], index) => {
       // 每个平台单独一份：只装它自己的 bundle，避免「打某个平台却带着所有平台」的体积翻倍
       const { pkgRoot } = await buildPerPlatformDir(buildRoot, key, info, skillDir);
       const tarPath = path.join(outRoot, `aibrowser-skill-${appVersion}-${key}.tar.gz`);
       forceRemove(tarPath);
-      execFileSync('tar', ['-czf', tarPath, '-C', pkgRoot, 'aibrowser'], { stdio: 'inherit' });
+      execFileSync('tar', ['-czf', tarPath, '-C', pkgRoot, 'aibrowser'], { stdio: 'ignore' });
       forceRemove(pkgRoot);
       process.stdout.write(`[skill] 分发包：${path.relative(root, tarPath)}（${Math.round(fs.statSync(tarPath).size / 1024 / 1024)}MB）\n`);
       process.stdout.write('         别人拿到后：tar -xzf <包> && cp -r aibrowser ~/.agents/skills/\n');
       info.archive = tarPath;
-      results.push({
+      tarResults[index] = ({
         platform: key.split('-')[0],
         arch: key.split('-')[1],
         ok: true,
@@ -564,7 +596,8 @@ async function main() {
         bundlePlatforms: [key], // 这一份包里只有这个平台（--combined 时才是全部）
         note: 'skill 包：自带应用，对方无需 node/npm',
       });
-    }
+    });
+    for (const entry of tarResults) if (entry) results.push(entry);
   }
   const indexFile = await writeIndex(results, args);
   process.stdout.write(`[skill] 索引：${path.relative(root, indexFile)}\n`);
