@@ -58,6 +58,13 @@ class PreviewManager {
      * 结果谁都拿不到帧、都超时。串行之后每个请求都能独占面板完成「切换 → 取帧」。
      */
     this._exclusive = Promise.resolve();
+    /**
+     * 「面板占用」计数：截图期间把它 +1，这期间别人请求切换标签（open / 点标签）只是记账，
+     * 等截图结束再生效 —— 否则截图正等画面时被切走，就会截到别人的页面（实测 6/6 都错）。
+     */
+    this._panelHold = 0;
+    this._pendingActiveView = undefined;
+    this._pendingFocus = undefined;
   }
 
   /**
@@ -138,6 +145,10 @@ class PreviewManager {
   }
 
   setFocus(id) {
+    if (this._panelHold > 0) {
+      this._pendingFocus = id;
+      return id;
+    }
     if (!this.sessions.has(id)) return null;
     this.focusedId = id;
     for (const session of this.sessions.values()) session.focused = session.id === id;
@@ -269,10 +280,39 @@ class PreviewManager {
     this.applyView();
   }
 
-  setActiveView(sessionId) {
+  setActiveView(sessionId, opts = {}) {
+    const forced = Boolean(opts.force); // 截图自己挂视图时必须立刻生效，否则占着面板反而截不到
+    if (process.env.AIBROWSER_DEBUG_CAPTURE === '1') {
+      const why = this._panelHold > 0 ? (forced ? '立即生效（截图自己挂）' : '延后（截图占着面板）') : '立即生效';
+      try {
+        require('./safe-io').writeStderr(`[panel] setActiveView ${sessionId} → ${why}\n`);
+      } catch {
+        /* 日志失败无妨 */
+      }
+    }
+    if (this._panelHold > 0 && !forced) {
+      this._pendingActiveView = sessionId; // 截图占着面板：先记账，结束再切
+      return;
+    }
     if (this.activeViewId === sessionId) return; // 幂等：重复设置不触发重排
     this.activeViewId = sessionId;
     this.applyView();
+  }
+
+  /** 开始/结束「面板占用」（截图用）：期间别人的切换请求延后生效 */
+  beginPanelHold() {
+    this._panelHold += 1;
+  }
+
+  endPanelHold() {
+    this._panelHold = Math.max(0, this._panelHold - 1);
+    if (this._panelHold > 0) return;
+    const pendingView = this._pendingActiveView;
+    const pendingFocus = this._pendingFocus;
+    this._pendingActiveView = undefined;
+    this._pendingFocus = undefined;
+    if (pendingFocus !== undefined) this.setFocus(pendingFocus);
+    if (pendingView !== undefined) this.setActiveView(pendingView);
   }
 
   /**

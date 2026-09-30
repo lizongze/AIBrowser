@@ -132,20 +132,84 @@ async function captureSessionShot({ manager, session, params = {} }) {
  * 这里只改主进程侧的 activeView（视图挂载完全由 applyView 决定），截完立刻把原活动会话还回去，
  * 面板 UI 的标签高亮因此不用动 —— 用户看到的还是他原来那一屏。
  */
-function attachSessionView(manager, session) {
+function attachSessionView(manager, session, opts = {}) {
   const previous = manager.activeViewId;
   if (previous === session.id) return { changed: false, previous };
-  manager.setActiveView(session.id);
+  manager.setActiveView(session.id, opts);
   return { changed: true, previous };
 }
 
+/**
+ * 截图前的「等画面稳一下」延迟（毫秒）。
+ * 为什么要它：刚切到某个标签、或页面刚打开时，合成器给出的第一帧可能还在过渡态
+ * （页面自己的入场渐显、切换重绘），立刻截就会拿到半透明/没画完的一帧。
+ * 这里就是简单等一小会儿 —— 不做逐帧比较，保持实现最小；不够用可以调大：
+ *   AIBROWSER_SHOT_SETTLE_MS=600
+ */
+const SHOT_SETTLE_MS = Math.max(0, Number(process.env.AIBROWSER_SHOT_SETTLE_MS ?? 300) || 0);
+
+/**
+ * 目标会话此刻是不是「面板上正在显示的那个」。
+ *
+ * 延迟期间别的进程可能把标签切走：面板截图会截到别人的页面，web 会话的视图被摘掉后也取不到帧。
+ * 代码会话在面板里是 CodeMirror 渲染（原生视图隐藏），所以用「面板聚焦的会话」判断。
+ */
+function isDisplayed(manager, session) {
+  if (manager.activeViewId === session.id) return true;
+  return session.kind === 'code' && manager.focusedId === session.id;
+}
+
+/**
+ * 截图（带「被抢走就重挂重试」）。
+ *
+ * 为什么要有这个循环：截图前会等一小会儿（SHOT_SETTLE_MS）让过渡走完，这段窗口里
+ * 另一个进程完全可以切走标签 —— 实测（6 次并发切换下截图）6/6 都会截到别人的页面。
+ * 所以每次取帧前都确认「现在显示的仍是目标」，被抢走就重新挂上再来一次；重试用完就明确报错，
+ * 而不是把别人的页面当结果返回。
+ */
 async function captureOnce({ manager, session, params = {}, win }) {
+  const attempts = win ? 4 : 1;
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const result = await captureAttempt({ manager, session, params, win, attempt });
+      if (result) return result;
+    } catch (err) {
+      lastError = err;
+      debugCapture(`attempt${attempt} 失败：${err.message}`);
+    }
+  }
+  if (lastError) throw lastError;
+  throw Object.assign(new Error('截图期间面板反复被别人切走（并发调用过多）：请稍后重试'), { code: 'EBUSY' });
+}
+
+async function captureAttempt({ manager, session, params = {}, win, attempt = 1 }) {
+  // 占住面板：这段窗口里别人请求切换标签只是记账，等我们截完再生效 —— 这样并发时谁都不会截错。
+  const held = Boolean(win);
+  if (held) manager.beginPanelHold?.();
+  try {
+    return await captureAttemptInner({ manager, session, params, win, attempt });
+  } finally {
+    if (held) manager.endPanelHold?.();
+  }
+}
+
+async function captureAttemptInner({ manager, session, params = {}, win, attempt = 1 }) {
   // 面板模式：先让目标会话的原生视图进合成场景（后台标签不产生帧）。
   // 直接改主进程的 activeView，不走渲染层往返 —— 这是并发下稳定的关键。
   const tAttach = Date.now();
-  const attached = win ? attachSessionView(manager, session) : { changed: false, previous: null };
+  const attached = win ? attachSessionView(manager, session, { force: true }) : { changed: false, previous: null };
   if (attached.changed) await sleep(220); // 等一帧新挂上的画面
-  debugCapture(`attach=${Date.now() - tAttach}ms（changed=${attached.changed} 原活动=${attached.previous}）`);
+  // 再统一等一小会儿，让切换/入场的过渡走完（见 SHOT_SETTLE_MS）。
+  // 重试时把等待压短：并发抢焦点时「窗口越小，越难被抢走」。
+  const settle = attempt === 1 ? SHOT_SETTLE_MS : Math.min(120, SHOT_SETTLE_MS);
+  if (settle) await sleep(settle);
+  debugCapture(`attempt${attempt} attach=${Date.now() - tAttach}ms（changed=${attached.changed} 原活动=${attached.previous}）`);
+  // 这段延迟里被别的进程切走了：重挂重试（下一次循环会重新 attach）
+  if (win && !isDisplayed(manager, session)) {
+    debugCapture(`attempt${attempt} 延迟期间标签被切走（现在显示 ${manager.activeViewId || manager.focusedId}），重挂重试`);
+    return null;
+  }
   const activated = Boolean(win);
 
   // 面板模式下的代码会话优先「截面板」：含标签条与行号栏，和用户看到的画面一致。
