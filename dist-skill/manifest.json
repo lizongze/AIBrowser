@@ -2,7 +2,7 @@
   "name": "aibrowser-skill",
   "version": "0.1.0",
   "electron": "38.8.6",
-  "generatedAt": "2026-09-29T01:33:26.024Z",
+  "generatedAt": "2026-09-30T08:46:39.047Z",
   "host": "linux-x64",
   "packages": [
     {
@@ -70,9 +70,9 @@
       "arch": "x64",
       "ok": true,
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-win32-x64.tar.gz",
-      "archiveBytes": 138279017,
-      "sha256": "141d5c9aec0328e68a0c97ddf28406ebd941381d3c874f14a879a4b0bbcac1d3",
-      "builtAt": "2026-09-29T01:33:11.589Z",
+      "archiveBytes": 138295761,
+      "sha256": "f50debb983d0ffd9bf04f8ad009d34d74a39bc285fa7734d28dcbe1805a37a3b",
+      "builtAt": "2026-09-30T08:46:39.030Z",
       "version": "0.1.0",
       "electron": "38.8.6",
       "bundlePlatforms": [
@@ -131,8 +131,8 @@
     },
     "win32-x64": {
       "archive": "/mnt/d/gitData/codefree/aiFlow/dist-skill/aibrowser-skill-0.1.0-win32-x64.tar.gz",
-      "sha256": "141d5c9aec0328e68a0c97ddf28406ebd941381d3c874f14a879a4b0bbcac1d3",
-      "bytes": 138279017,
+      "sha256": "f50debb983d0ffd9bf04f8ad009d34d74a39bc285fa7734d28dcbe1805a37a3b",
+      "bytes": 138295761,
       "bundlePlatforms": [
         "win32-x64"
       ]
