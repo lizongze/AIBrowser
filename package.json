@@ -31,7 +31,8 @@
     "start": "npm run build && electron .",
     "verify": "npm run build && node scripts/verify.mjs",
     "watch": "node scripts/build.mjs --watch",
-    "test:root": "node skills/aibrowser/tests/root-cases.js"
+    "test:root": "node skills/aibrowser/tests/root-cases.js",
+    "test:groups": "node scripts/verify-groups.mjs"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.8.0",
