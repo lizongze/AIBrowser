@@ -239,7 +239,10 @@ function zipLooksValid(platform, zipPath) {
   try {
     // 注意用 chr(10) 而不是 "\n"：那段 Python 代码是 JS 字符串字面量，写 \n 会被真正换行破坏
     const listing = execFileSync('python3', ['-c', 'import sys,zipfile;print(chr(10).join(zipfile.ZipFile(sys.argv[1]).namelist()))', zipPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-    return markers.every((marker) => listing.split('\n').some((line) => line === marker || line.startsWith(`${marker}/`)));
+    // Windows 上子进程 stdout 是 CRLF：不先去掉 \r，'electron.exe\r' 永远不等于 'electron.exe'，
+    // 缓存里明明是好的包也会被判成「不是这个平台的」，于是每次打包都白下一遍 100MB+。
+    const lines = listing.replace(/\r\n/g, '\n').split('\n');
+    return markers.every((marker) => lines.some((line) => line === marker || line.startsWith(`${marker}/`)));
   } catch {
     return true; // 判断不了就不拦（比如没装 python3）
   }
