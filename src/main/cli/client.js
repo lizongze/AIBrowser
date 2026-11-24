@@ -256,16 +256,73 @@ function launchService({ gui = false, port, identity, logName = gui ? 'gui' : 'd
 }
 
 /**
- * 清掉「状态文件还在、但服务已经不可达」的残留。
- * Windows 上命名管道被上个实例占着时，新实例会直接起不来 —— 手工配方里的
- * `pvs stop` + 等 2 秒就是为了这个。这里做进源码，调用方不用再记这一步。
+ * 「活着但暂时联系不上」的宽限期（毫秒）。
+ *
+ * 为什么需要：截图/编码大图时主进程会**同步**忙一段时间（实测整页截图能让 900ms 的探活超时），
+ * 而这期间进程完全正常。以前只要一次探活失败就判定「残留」并 SIGTERM —— Windows 上那是
+ * TerminateProcess：面板瞬间消失、没有清理、没有日志，紧接着下一条命令又把新实例拉起来，
+ * 用户看到的就是「闪退后自己重启，没截完的页面全没了」。
  */
-async function clearStaleRuntime({ sleepMs = 0 } = {}) {
+const STALE_GRACE_MS = 3000;
+
+/** 记录一次「谁杀了谁、为什么」——硬杀不留任何系统痕迹，只能靠这条日志回溯 */
+function logKill(entry) {
+  try {
+    const file = path.join(runtimeDir(), 'aibrowser-kill.log');
+    fs.mkdirSync(runtimeDir(), { recursive: true });
+    fs.appendFileSync(file, `[${new Date().toISOString()}] ${JSON.stringify(entry)}\n`);
+  } catch {
+    /* 记不下来就算了 */
+  }
+}
+
+/**
+ * 清掉「状态文件还在、但服务已经不可达」的残留。
+ *
+ * 关键改动（修「多页面并发截图时面板突然消失又自己重启」）：
+ *   1. 先给宽限：进程还活着时，一段时间内反复探活，只有**持续**不可达才算残留；
+ *   2. **绝不因为一两次探活失败就杀活进程**：活着但联系不上 → 直接返回 unreachable-alive，
+ *      交给调用方重试（提示用户 `pvs stop --force`），而不是 TerminateProcess；
+ *   3. 只有 pid 已经不在（真残留状态）或显式 force 才清理；force 也先发优雅 shutdown，
+ *      等不到退出才补 SIGTERM，并写 kill log。
+ */
+async function clearStaleRuntime({ sleepMs = 0, force = false, graceMs = STALE_GRACE_MS } = {}) {
   const state = readState();
   if (!state) return { cleared: false, reason: 'no-state' };
-  const found = await resolveTarget({});
+
+  const alive = pidAlive(state.pid);
+  // pid 已经不在了：这只是「状态文件残留」，清掉文件即可（绝不涉及杀进程）
+  if (!alive) {
+    try {
+      fs.rmSync(statePath(), { force: true });
+    } catch {
+      /* 忽略 */
+    }
+    if (sleepMs) await sleep(sleepMs);
+    return { cleared: true, killed: false, pid: state.pid, reason: 'dead-pid' };
+  }
+
+  // 进程还活着：给一段「可能正在忙」的宽限，持续探活
+  let found = await resolveTarget({});
+  const deadline = Date.now() + (force ? 0 : Math.max(0, graceMs));
+  while (!found.ok && Date.now() < deadline) {
+    await sleep(500);
+    found = await resolveTarget({});
+  }
   if (found.ok) return { cleared: false, reason: 'running' };
+  if (!force) {
+    return { cleared: false, reason: 'unreachable-alive', pid: state.pid, probe: found.reason || 'unknown' };
+  }
+
+  // 显式 force（`pvs stop --force`）：先礼后兵
   let killed = false;
+  try {
+    await send('shutdown', {}, { state, timeoutMs: 3000 });
+  } catch {
+    /* 通道不通就只能补刀 */
+  }
+  const softDeadline = Date.now() + 3000;
+  while (Date.now() < softDeadline && pidAlive(state.pid)) await sleep(200);
   if (pidAlive(state.pid)) {
     try {
       process.kill(state.pid, 'SIGTERM');
@@ -274,13 +331,14 @@ async function clearStaleRuntime({ sleepMs = 0 } = {}) {
       /* 已经不在了 */
     }
   }
+  logKill({ action: 'force-kill', pid: state.pid, probe: found.reason || 'unknown', port: state.port, mode: state.mode });
   try {
     fs.rmSync(statePath(), { force: true });
   } catch {
     /* 忽略 */
   }
   if (sleepMs) await sleep(sleepMs);
-  return { cleared: true, killed, pid: state.pid };
+  return { cleared: true, killed, pid: state.pid, reason: 'forced' };
 }
 
 /**
@@ -385,14 +443,28 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   if (process.env.AIBROWSER_LAZY_STARTED === '1' || starting) {
     const grace = await waitForTarget({ prefer, timeoutMs: 30000, intervalMs: 300 });
     if (grace.ok) return { state: grace.state, spawned: false, waited: true };
-    if (!quiet) writeStderr(`[pvs] 已有进程（pid ${starting?.pid ?? '?'}）30s 仍未就绪，按卡死处理：清掉重来`);
+    if (!quiet) writeStderr(`[pvs] 已有进程（pid ${starting?.pid ?? '?'}）30s 仍未就绪：先确认它是真死了还是只是忙（不会直接杀）`);
   }
 
-  // 服务不可达但状态文件还在：可能是残留（上一个实例的命名管道还占着）。
-  // 清掉再起，否则新实例会 bind EADDRINUSE 直接失败。
+  // 服务不可达但状态文件还在：可能是残留（上一个实例死了、状态没清），也可能是**活着但正忙**。
+  // clearStaleRuntime 只在 pid 确实不在、或显式 force 时才清理；活着但联系不上会返回
+  // unreachable-alive，交给下面给出明确提示 —— 绝不因为一两次探活超时就杀掉面板。
   const stale = await clearStaleRuntime({ sleepMs: process.platform === 'win32' ? 1500 : 0 });
   if (stale.cleared && !quiet) {
-    writeStderr(`[pvs] 清掉残留状态（pid ${stale.pid}${stale.killed ? ' 已结束' : ''}）后重新拉起服务`);
+    writeStderr(`[pvs] 清掉残留状态（pid ${stale.pid}${stale.killed ? '（已结束）' : '（pid 已不在）'}）后重新拉起服务`);
+  }
+  if (stale.reason === 'unreachable-alive') {
+    throw Object.assign(new Error(
+      `服务进程 pid ${stale.pid} 还活着，但控制通道连续探活失败（${stale.probe}）。`
+      + '最常见的原因是它正在忙（截图/编码大图会占住主进程几百毫秒到几秒，面板本身是好的）。'
+      + '为避免把你正在用的面板杀掉，这里**不会**自动重启：稍等几秒重试即可；'
+      + '确认真的卡死了再用 `pvs stop --force`。',
+    ), { code: 'ESTUCK', pid: stale.pid });
+  }
+  // 宽限期内它自己恢复了（忙完 / 通道恢复）：直接复用，绝不再拉起第二个实例
+  if (stale.reason === 'running') {
+    const again = await resolveTarget({ prefer });
+    if (again.ok) return { state: again.state, spawned: false, waited: true };
   }
 
   const { child, logFile } = launchService({ gui: !headless, port, identity, logName: headless ? 'daemon' : 'gui' });
@@ -406,22 +478,29 @@ async function ensureTarget({ mode = 'auto', noSpawn = false, port, quiet = fals
   return { state: ready.state, spawned: true, pid: child.pid };
 }
 
-async function stopTarget() {
+/**
+ * 停掉当前服务（`pvs stop` / 模式切换时调用）。
+ * 属于**显式意图**，所以可以真的结束进程；但仍然先发优雅 shutdown，等不到退出才补 SIGTERM，
+ * 并把「是谁杀的、为什么」记进 kill log（TerminateProcess 不留任何系统痕迹）。
+ */
+async function stopTarget({ force = false } = {}) {
   const state = readState();
   if (!state) return { stopped: false, reason: 'no-state' };
   if (!pidAlive(state.pid)) return { stopped: false, reason: 'dead', pid: state.pid };
   try {
-    await send('shutdown', {}, { state, timeoutMs: 4000 });
+    await send('shutdown', {}, { state, timeoutMs: force ? 1500 : 4000 });
   } catch {
-    /* 直接补刀 */
+    /* 通道不通就只能补刀 */
   }
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + (force ? 1200 : 5000);
   while (Date.now() < deadline) {
     if (!pidAlive(state.pid)) return { stopped: true, pid: state.pid };
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   try {
     process.kill(state.pid, 'SIGTERM');
+    logKill({ action: 'stop-kill', pid: state.pid, mode: state.mode, port: state.port, forced: Boolean(force) });
+    try { fs.rmSync(statePath(), { force: true }); } catch { /* ignore */ }
     return { stopped: true, pid: state.pid, forced: true };
   } catch {
     return { stopped: false, pid: state.pid, reason: 'kill-failed' };

@@ -90,10 +90,12 @@ function probe(state, { timeoutMs = 700 } = {}) {
       resolve({ ok: false, reason: 'no-state' });
       return;
     }
-    if (!fs.existsSync(info.socket)) {
-      resolve({ ok: false, reason: 'no-socket', state: info });
-      return;
-    }
+    // 注意：**不能用 fs.existsSync 判断 socket 在不在**。
+    // Windows 的控制通道是命名管道（\\.\pipe\aibrowser-control-<user>），它没有文件系统实体，
+    // existsSync 永远返回 false —— 以前的实现因此永远走「no-socket」，从不去 ping，
+    // 「服务活没活」就只剩一条 900ms 的 HTTP 探活；主进程忙一下（截大图、GC）就会被判成
+    // 「残留/卡死」，接着被 clearStaleRuntime 硬杀掉，表现就是面板突然消失、随后又被重新拉起。
+    // 直接连：管道不存在时 net.connect 会立刻给 ENOENT，比 existsSync 更准。
     const socket = net.connect(info.socket);
     let buffer = '';
     const done = (result) => {

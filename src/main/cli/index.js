@@ -656,9 +656,10 @@ async function commandServe(_args, flags) {
 }
 
 async function commandStop(_args, flags) {
-  const result = await stopTarget();
+  // 只有显式 stop 才会真的结束进程；--force 跳过优雅等待（通道已经不通时用）
+  const result = await stopTarget({ force: Boolean(flags.force) });
   if (flags.json) jsonOut({ ok: result.stopped, ...result });
-  else out(result.stopped ? `已停止 · pid ${result.pid}` : `未在运行${result.reason ? `（${result.reason}）` : ''}`);
+  else out(result.stopped ? `已停止 · pid ${result.pid}${result.forced ? '（强制）' : ''}` : `未在运行${result.reason ? `（${result.reason}）` : ''}`);
   return result.stopped ? EXIT_OK : EXIT_FAIL;
 }
 
